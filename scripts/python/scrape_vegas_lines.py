@@ -15,6 +15,9 @@ import re
 
 OUTPUT_DIR = r"C:\Users\Tom\programming\NBA_LINES"
 
+SPORTSBOOK_LIST = ['Open', 'VI Consensus', 'Westgate', 'MGM', 'WIlliam Hill', 'Wynn',
+                   'CG Technology', 'Stations', 'BetOnline']
+
 def generate_lists(this_table):
     """
     """
@@ -43,8 +46,67 @@ def generate_lists(this_table):
     
     return df
 
+def parse_PS_string(PS_string):
+    """
+    Gets the point spread and the value of the bet from the string
+    """
+    fields = PS_string.split()
+    PS = -9999
+    value = -9999
+    try:
+        PS = float(fields[0])
+    except:
+        PS = float(fields[0][:-1])
+        if PS < 0:
+            PS -= .5
+        else:
+            PS += .5
+
+    # If it is an even line
+    if fields[1].find("EV") != -1:
+        value = 0
+    else:
+        value = float(fields[1])
+        
+    return [PS, value]
+    
+def parse_OU_string(OU_string):
+    """
+    Gets the over_under point amount and the value of the bet from the string
+    """
+    if OU_string.find("u") == -1 and OU_string.find("o") == -1:
+        print ("WARNING: over_under_line('%s') doesn't contain an 'o' or a 'u'" % OU_string)
+        return [-9999,-9999]
+
+    fields = []
+    # True/False flag based on if the spread is an over or an under
+    under = True
+    if OU_string.find("u") != -1:
+        # This is the under spread
+        fields = OU_string.split("u")
+    else:
+        under = False
+        fields = OU_string.split("o")
+
+    over_under = -9999
+    value = -9999
+    try:
+        over_under = float(fields[0])
+    except:
+        over_under = float(fields[0][:-1])+.5
+        
+    if (fields[1].find("EV") != -1):
+        value = 0
+    else:
+        value = float(fields[1])
+
+    if under == True:
+        over_under = -over_under
+    return [over_under, value]
+
 def process_odds_table(this_table, cur_time):
     print ("Processing table")
+
     all_entries = this_table.findAll("tr")
     # Loop through each matchup
     current_time_list = []
@@ -59,7 +121,6 @@ def process_odds_table(this_table, cur_time):
         #notes_row = all_entries[x+1]
         #notes_cells = notes_row.findAll('td')
 
-        #print ("----------------- %d ---------------------------" % len(cells))
         # Get the two teams that are playing        
         xml_teams = cells[0].findAll('b')
         home_team = xml_teams[0].find(text=True)
@@ -71,27 +132,29 @@ def process_odds_table(this_table, cur_time):
         #print ("Game_time: %s Home_team: %s  Away_team: %s\n" % (game_time, home_team, away_team))
         over_under_list = []
         point_spread_list = []
-        for b in range(1, len(cells)):
+        for b in range(1, len(cells)):            
             xml_bet_entry = cells[b].find('a')
             if (xml_bet_entry==None) or (len(xml_bet_entry) == 0):
+                over_under_list.append([-9999,-9999])
+                point_spread_list.append([-9999,-9999])
                 continue
             first_string = "%s" % xml_bet_entry.contents[2]
             second_string = "%s" % xml_bet_entry.contents[4]
 
-            #first_string = first_string.translate({ord(c): " " for c in "\n\t\a"})
-            #second_string = second_string.translate({ord(c): " " for c in "\n\t\a"})       
-            #first_string = re.sub(r'[\n|\t]', r'', first_string)
-            #second_string = re.sub(r'[\n|\t]', r'', second_string)            
-            #first_string = re.sub('\W+', ' ', first_string)
-            #second_string = re.sub('\W+', ' ', second_string)            
-            # Determine which string is the over-under line, and append them to list
+            # IF this is an over/under string
             if (first_string.find("u") != -1) or (first_string.find("o") != -1):
-                over_under_list.append(first_string)
-                point_spread_list.append(second_string)
-            else:
-                over_under_list.append(second_string)
-                point_spread_list.append(first_string)
-
+                (spread, spread_value) = parse_OU_string(first_string)
+                (line, line_value) = parse_PS_string(second_string)
+                
+                over_under_list.append([spread, spread_value])
+                point_spread_list.append([line, line_value])
+            else:                
+                (spread, spread_value) = parse_OU_string(second_string)
+                (line, line_value) = parse_PS_string(first_string)
+                
+                over_under_list.append([spread, spread_value])
+                point_spread_list.append([line, line_value])
+        
         #print ("Over Under List")
         #print (over_under_list)
         #print ("Point Spread List")
@@ -110,8 +173,13 @@ def process_odds_table(this_table, cur_time):
     df['Home_Team'] = home_team_list
     df['Away_Team'] = away_team_list
     df['Game_Time'] = game_time_list
-    df['Over_Unders'] = over_under_map
-    df['Point_spreads'] = point_spread_map
+    for s in range(0, len(SPORTSBOOK_LIST)):
+        OU_key = "Over_under_%s" % SPORTSBOOK_LIST[s]        
+        df[OU_key] = [v[s][0] for v in over_under_map]
+        PS_key = "Point_spread_%s" % SPORTSBOOK_LIST[s]
+        df[PS_key] = [v[s][0] for v in point_spread_map]
+    #df['Over_Unders'] = over_under_map
+    #df['Point_spreads'] = point_spread_map
 
     today_date = time.strftime("%Y%m%d", time.localtime(cur_time))
     output_file = "%s/vegas_bets.%s.csv" % (OUTPUT_DIR, today_date)
@@ -136,13 +204,14 @@ def process(options):
             print(soup.prettify(),file=f)
 
     # print a specific html tag
-    print (soup.title)
+    #print (soup.title)
 
     tables_list = soup.find_all('table')
     #print (len(tables_list))
     #for x in range(0, len(tables_list)):
     #    print ("-------------------------- %d ---------------------------------" % len(tables_list[x]))
     #    print (tables_list[x])
+    #sys.exit()
 
     # Assume the Odds table is the largest one
     table_len_list = [len(tables_list[x]) for x in range(0, len(tables_list))]
