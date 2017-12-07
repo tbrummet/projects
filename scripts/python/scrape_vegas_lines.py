@@ -12,11 +12,14 @@ import urllib.request
 from bs4 import BeautifulSoup
 import pandas as pd
 import re
+import logging
 
 OUTPUT_DIR = r"C:\Users\Tom\programming\NBA_LINES"
 
 SPORTSBOOK_LIST = ['Open', 'VI Consensus', 'Westgate', 'MGM', 'WIlliam Hill', 'Wynn',
                    'CG Technology', 'Stations', 'BetOnline']
+
+LEAGUES = ['NBA', 'NCAAB']
 
 def generate_lists(this_table):
     """
@@ -50,6 +53,9 @@ def parse_PS_string(PS_string):
     """
     Gets the point spread and the value of the bet from the string
     """
+
+    if len(PS_string) <= 1:
+        return [-9999,-9999]
     fields = PS_string.split()
     PS = -9999
     value = -9999
@@ -74,6 +80,9 @@ def parse_OU_string(OU_string):
     """
     Gets the over_under point amount and the value of the bet from the string
     """
+    if OU_string.replace(" ","") == "":
+        return [-9999,-9999]
+    
     if OU_string.find("u") == -1 and OU_string.find("o") == -1:
         print ("WARNING: over_under_line('%s') doesn't contain an 'o' or a 'u'" % OU_string)
         return [-9999,-9999]
@@ -104,8 +113,8 @@ def parse_OU_string(OU_string):
         over_under = -over_under
     return [over_under, value]
 
-def process_odds_table(this_table, cur_time):
-    print ("Processing table")
+def process_odds_table(this_table, cur_time, league):
+    #print ("Processing table")
 
     all_entries = this_table.findAll("tr")
     # Loop through each matchup
@@ -115,17 +124,19 @@ def process_odds_table(this_table, cur_time):
     game_time_list = []
     over_under_map = []
     point_spread_map = []
-    for x in range(0, len(all_entries),2):
+    for x in range(0, len(all_entries)):
         data_row = all_entries[x]
         cells = data_row.findAll('td')
         #notes_row = all_entries[x+1]
         #notes_cells = notes_row.findAll('td')
 
-        # Get the two teams that are playing        
+        # Get the two teams that are playing
         xml_teams = cells[0].findAll('b')
+        if len(xml_teams) == 0:
+            continue
+
         home_team = xml_teams[0].find(text=True)
-        away_team = xml_teams[1].find(text=True)
-        
+        away_team = xml_teams[1].find(text=True)        
         # Get the match time
         xml_time = cells[0].find('span')
         game_time = xml_time.find(text=True)
@@ -140,7 +151,6 @@ def process_odds_table(this_table, cur_time):
                 continue
             first_string = "%s" % xml_bet_entry.contents[2]
             second_string = "%s" % xml_bet_entry.contents[4]
-
             # IF this is an over/under string
             if (first_string.find("u") != -1) or (first_string.find("o") != -1):
                 (spread, spread_value) = parse_OU_string(first_string)
@@ -148,13 +158,23 @@ def process_odds_table(this_table, cur_time):
                 
                 over_under_list.append([spread, spread_value])
                 point_spread_list.append([line, line_value])
-            else:                
+            elif (second_string.find("u") != -1) or (second_string.find("o") != -1):
                 (spread, spread_value) = parse_OU_string(second_string)
                 (line, line_value) = parse_PS_string(first_string)
                 
                 over_under_list.append([spread, spread_value])
-                point_spread_list.append([line, line_value])
-        
+                point_spread_list.append([line, line_value])                
+            else:
+                if len(first_string) > 1:
+                    (spread, spread_value) = parse_PS_string(first_string)
+                elif len(second_string) > 1:
+                    (spread, spread_value) = parse_PS_string(second_string)
+                else:
+                    spread = -9999
+                    spread_value = -9999
+                over_under_list.append([-9999,-9999])
+                point_spread_list.append([spread, spread_value])
+
         #print ("Over Under List")
         #print (over_under_list)
         #print ("Point Spread List")
@@ -181,17 +201,25 @@ def process_odds_table(this_table, cur_time):
     #df['Over_Unders'] = over_under_map
     #df['Point_spreads'] = point_spread_map
 
-    today_date = time.strftime("%Y%m%d", time.localtime(cur_time))
-    output_file = "%s/vegas_bets.%s.csv" % (OUTPUT_DIR, today_date)
-    print ("Writing: %s" % output_file)
+    output_time_str = cur_time - (cur_time%1800)
+    today_date = time.strftime("%Y%m%d.%H%M", time.localtime(output_time_str))
+    output_file = "%s/%s_vegas_bets.%s.csv" % (OUTPUT_DIR, league, today_date)
+    #print ("Writing: %s" % output_file)
     df.to_csv(output_file)
        
     
-def process(options):
+def process(league, options):
     # Get current time
     cur_time = time.time()
-    url = "http://www.vegasinsider.com/nba/odds/las-vegas/"
-    
+
+    if league == "NBA":
+        url = "http://www.vegasinsider.com/nba/odds/las-vegas/"        
+    else:
+        url = "http://www.vegasinsider.com/college-basketball/odds/las-vegas/"
+
+        
+    lg_str = "Reading %s" % (url)
+    logging.info(lg_str)
     # Read the wiki page    
     page = urllib.request.urlopen(url)
 
@@ -217,28 +245,42 @@ def process(options):
     table_len_list = [len(tables_list[x]) for x in range(0, len(tables_list))]
     our_table_ind = table_len_list.index(max(table_len_list))
 
-    process_odds_table(tables_list[our_table_ind], cur_time)
+    logging.info("Processing odds table")
+    process_odds_table(tables_list[our_table_ind], cur_time, league)
 
 
+    logging.info("Exit\n")
     #our_table = soup.find('table', class_="frodds-data-tb1")
     #print (our_table)
     
     
 def main():
-    usage_str = "%prog"
+    usage_str = "%prog league"
+    usage_str = "%s\n\tleague : One of %s" % (usage_str, ','.join(LEAGUES))
     usage_str = "%s\n Default behavior is to output the daily bet information to a csv file under %s" % (usage_str, OUTPUT_DIR)
     parser = OptionParser(usage = usage_str)
     parser.add_option("-p", "--pretty_output_file", dest="prettyOut", help="Write the raw xml file to this output asc file")
     
         
     (options, args) = parser.parse_args()
+        
     
-    if len(args) < 0:
+    if len(args) < 1:
         parser.print_help()
-        sys.exit(2)
-
+        sys.exit(2)    
+        
+    lge = args[0]
     
-    process(options)
+    if lge not in LEAGUES:
+        print ("Not valid arg")
+        sys.exit()
+
+    log_file = "C:/Users/Tom/programming/log/scrape_%s_line.%s.log" % (lge, time.strftime("%Y%m%d"))
+    logging.basicConfig(filename=log_file, level=logging.INFO)
+
+    logging.info("Starting")        
+    
+    process(lge, options)
 
 
 if __name__ == "__main__":
