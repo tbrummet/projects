@@ -62,12 +62,14 @@ def parse_PS_string(PS_string):
     try:
         PS = float(fields[0])
     except:
-        PS = float(fields[0][:-1])
-        if PS < 0:
-            PS -= .5
-        else:
-            PS += .5
-
+        try:
+            PS = float(fields[0][:-1])
+            if PS < 0:
+                PS -= .5
+            else:
+                PS += .5
+        except:
+            return [-9999,-9999]
     # If it is an even line
     if fields[1].find("EV") != -1:
         value = 0
@@ -127,8 +129,10 @@ def process_odds_table(this_table, cur_time, league):
     for x in range(0, len(all_entries)):
         data_row = all_entries[x]
         cells = data_row.findAll('td')
+
         #notes_row = all_entries[x+1]
         #notes_cells = notes_row.findAll('td')
+        #print (notes_cells)
 
         # Get the two teams that are playing
         xml_teams = cells[0].findAll('b')
@@ -203,7 +207,14 @@ def process_odds_table(this_table, cur_time, league):
 
     output_time_str = cur_time - (cur_time%1800)
     today_date = time.strftime("%Y%m%d.%H%M", time.localtime(output_time_str))
-    output_file = "%s/%s_vegas_bets.%s.csv" % (OUTPUT_DIR, league, today_date)
+    output_date_dir = "%s\%s" % (OUTPUT_DIR, today_date[:8])
+    if not os.path.exists(output_date_dir):
+        cmd = "mkdir %s" % output_date_dir
+        logging.info("Executing: %s" % cmd)
+        ret = os.system(cmd)
+        logging.info("Ret: %d" % ret)
+        
+    output_file = "%s\%s_vegas_bets.%s.csv" % (output_date_dir, league, today_date)
     #print ("Writing: %s" % output_file)
     df.to_csv(output_file)
        
@@ -222,7 +233,9 @@ def process(league, options):
     logging.info(lg_str)
     # Read the wiki page    
     page = urllib.request.urlopen(url)
-
+    lg_str = "Finished reading url"
+    logging.info(lg_str)
+    
     # Convert it to beautifulSoup format
     soup = BeautifulSoup(page,"lxml")
 
@@ -276,7 +289,7 @@ def main():
         sys.exit()
 
     log_file = "C:/Users/Tom/programming/log/scrape_%s_line.%s.log" % (lge, time.strftime("%Y%m%d"))
-    logging.basicConfig(filename=log_file, level=logging.INFO)
+    logging.basicConfig(filename=log_file, level=logging.INFO, format='%(asctime)s: %(message)s', datefmt='%Y/%m/%d %H:%M:%S ')
 
     logging.info("Starting")        
     
