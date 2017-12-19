@@ -139,8 +139,8 @@ def process_odds_table(this_table, cur_time, league):
         if len(xml_teams) == 0:
             continue
 
-        home_team = xml_teams[0].find(text=True)
-        away_team = xml_teams[1].find(text=True)        
+        away_team = xml_teams[0].find(text=True)                
+        home_team = xml_teams[1].find(text=True)
         # Get the match time
         xml_time = cells[0].find('span')
         game_time = xml_time.find(text=True)
@@ -157,17 +157,19 @@ def process_odds_table(this_table, cur_time, league):
             second_string = "%s" % xml_bet_entry.contents[4]
             # IF this is an over/under string
             if (first_string.find("u") != -1) or (first_string.find("o") != -1):
+                # If first string is the over_under, then the home team is favored
                 (spread, spread_value) = parse_OU_string(first_string)
                 (line, line_value) = parse_PS_string(second_string)
                 
                 over_under_list.append([spread, spread_value])
                 point_spread_list.append([line, line_value])
             elif (second_string.find("u") != -1) or (second_string.find("o") != -1):
+                # if the first_string is the line, then the away team is favored
                 (spread, spread_value) = parse_OU_string(second_string)
                 (line, line_value) = parse_PS_string(first_string)
                 
                 over_under_list.append([spread, spread_value])
-                point_spread_list.append([line, line_value])                
+                point_spread_list.append([abs(line), line_value])                
             else:
                 if len(first_string) > 1:
                     (spread, spread_value) = parse_PS_string(first_string)
