@@ -169,21 +169,28 @@ def analyze_over_under(game_df):
     over = 0
     perfect = 0
     skipped = 0
+    new_col = []
     for ind, row in game_df.iterrows():
         if pd.isnull(row['predicted_over_under']):
             skipped += 1
+            new_col.append(-1)
             continue
         game_points = row['VisitorPTS'] + row['HomePTS']
         predicted_points = row['predicted_over_under']
         # If the predicted points were less than the actual points
         if abs(game_points) > abs(predicted_points):
             under += 1
+            new_col.append(1)
         elif abs(game_points) < abs(predicted_points):
             # If the predicted points were more than the game points            
             over += 1
+            new_col.append(0)
         else:
             # If the predicted points matched the game points perfectly
             perfect += 1
+            new_col.append(9)
+
+    game_df["Over_Under_HIT"] = new_col
 
     return (over, under, perfect, skipped)
 
@@ -353,6 +360,24 @@ def get_prior_away_game_avg(row, game_df, points_var, lookback_games):
 
     return away_game_df[points_var][-lookback_games:].mean()
 
+def get_team_rest(row, game_df, key):
+    """
+    """
+    # Get all games for this team
+    team_df = game_df[((game_df['Home/Neutral'] == row[key]) | (game_df['Visitor/Neutral'] == row[key]))]
+    time_df = team_df[(team_df['EpochDt'] < row['EpochDt'])].reset_index()
+
+    if len(time_df) == 0:
+        return -1
+    
+    last_game = time_df.iloc[-1]['EpochDt']
+
+    # Get difference in time
+    time_diff_secs = row['EpochDt']-last_game
+
+    # Return the time in days and round up to nearest day
+    return (round(time_diff_secs/86400))
+
 def analyze_betting_strats(game_df):
     """
     """
@@ -367,35 +392,59 @@ def analyze_betting_strats(game_df):
                                           axis=1)
 
 
-    # Test strategy
-    strat_success_list = []
+    # Add columns for home and away team rest
+    game_df["HomeRest"] = game_df.apply(lambda row: get_team_rest(row, game_df, "Home/Neutral"), axis=1)
+    game_df["AwayRest"] = game_df.apply(lambda row: get_team_rest(row, game_df, "Visitor/Neutral"), axis=1)    
+
+    rest_over_under_map = {}
     for ind, row in game_df.iterrows():
-        # Ignore if either of these are missing
-        if pd.isnull(row['HomeTeamPointsScoredPast_3_HomeGame'])==True or pd.isnull(row['AwayTeamPointsScoredPast_3_AwayGame'])==True:
+        # If there isn't a rest listed for one of the teams, skip
+        if (row['HomeRest'] == -1) or (row['AwayRest'] == -1):
             continue
-        # Ignore if we don't have predicted values
-        if pd.isnull(row['predicted_over_under']):
-            continue
-        avg_points_scored_past_games = row['HomeTeamPointsScoredPast_3_HomeGame'] + row['AwayTeamPointsScoredPast_3_AwayGame']
+        total_rest = row['HomeRest'] + row['AwayRest']
+        if total_rest not in rest_over_under_map:
+            rest_over_under_map[total_rest] = []
+
         game_points = row['VisitorPTS'] + row['HomePTS']
+        # APpend 1 if it is over the predicted amnt, 0 if not
+        if game_points > abs(row['predicted_over_under']):
+            rest_over_under_map[total_rest].append(1)
+        elif game_points < abs(row['predicted_over_under']):
+            rest_over_under_map[total_rest].append(0)
+        
+    for key in sorted(rest_over_under_map):
+        print ("Total_Rest: %d" % key)
+        print ("BeatOdds: %f" % (sum(rest_over_under_map[key]) / len(rest_over_under_map[key])))
+        print ("SampleSize: %d" % len(rest_over_under_map[key]))
+               
+    ## Test Over/Under strategy
+    #strat_success_list = []
+    #for ind, row in game_df.iterrows():
+    #    # Ignore if either of these are missing
+    #    if pd.isnull(row['HomeTeamPointsScoredPast_1_HomeGame'])==True or pd.isnull(row['AwayTeamPointsScoredPast_1_AwayGame'])==True:
+    #        continue
+    #    # Ignore if we don't have predicted values
+    #    if pd.isnull(row['predicted_over_under']):
+    #        continue
+    #    avg_points_scored_past_games = row['HomeTeamPointsScoredPast_1_HomeGame'] + row['AwayTeamPointsScoredPast_1_AwayGame']
+    #    game_points = row['VisitorPTS'] + row['HomePTS']
 
-        print (row)
-        print ("Average_past_points: %f" % avg_points_scored_past_games)
-        print ("Game_Points: %f" % game_points)
-        if avg_points_scored_past_games < abs(row['predicted_over_under']):
-            if game_points < abs(row['predicted_over_under']):
-                strat_success_list.append(1)
-            else:
-                strat_success_list.append(0)
-        elif avg_points_scored_past_games > abs(row['predicted_over_under']):
-            if game_points > abs(row['predicted_over_under']):
-                strat_success_list.append(1)
-            else:
-                strat_success_list.append(0)
-        print ("Success/Fail: %s" % strat_success_list[-1])
-
-    print (len(strat_success_list))
-    print (sum(strat_success_list)/len(strat_success_list))
+    #    print (row)
+    #    print ("Average_past_points: %f" % avg_points_scored_past_games)
+    #    print ("Game_Points: %f" % game_points)
+    #    if avg_points_scored_past_games < abs(row['predicted_over_under']):
+    #        if game_points < abs(row['predicted_over_under']):
+    #            strat_success_list.append(1)
+    #        else:
+    #            strat_success_list.append(0)
+    #    elif avg_points_scored_past_games > abs(row['predicted_over_under']):
+    #        if game_points > abs(row['predicted_over_under']):
+    #            strat_success_list.append(1)
+    #        else:
+    #            strat_success_list.append(0)
+    #    print ("Success/Fail: %s" % strat_success_list[-1])
+    #print (len(strat_success_list))
+    #print (sum(strat_success_list)/len(strat_success_list))
                 
     game_df.to_csv("tmp.csv")
     
@@ -422,9 +471,6 @@ def process(game_file, odds_dir, file_base, options):
         print_statistics(game_df, options.statistics_file)
         sys.exit()
     print ("Analyzing %d games" % (len(game_df)))
-
-    # Look at betting strategies
-    analyze_betting_strats(game_df)
     
     # Look at all over unders
     (over, under, perfect, skipped) = analyze_over_under(game_df)
@@ -436,7 +482,10 @@ def process(game_file, odds_dir, file_base, options):
     # Find rest inbetween games
     #  -- To see if teams who just recently played often beat the spread or not
     #analyze_team_rest_over_under(game_df)
-    
+
+    # Look at betting strategies
+    analyze_betting_strats(game_df)
+
 
 def main():
     usage_str = "%prog basketball_game_file odds_dir file_base"
