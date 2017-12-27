@@ -57,6 +57,7 @@ def find_odds(odds_df, game_date, home_team, away_team):
 
 def add_odds(game_df, odds_df):
     """
+    Adds the predicted over/under keys as columns to the game_df dataframe
     """
     predicted_spread_list = []
     predicted_over_under_list = []
