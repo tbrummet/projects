@@ -12,6 +12,10 @@ import pandas as pd
 import numpy as np
 import Tutils
 
+from bokeh.plotting import figure, show, output_file, save
+
+TOOLS = "pan,box_zoom,reset,save,box_select,undo,redo,crosshair"
+
 def read_odds_dir(odds_dir, file_base):
     """
     Returns a pandas dataframe
@@ -41,7 +45,7 @@ def find_odds(odds_df, game_date, home_team, away_team):
 
     # If the game doesn't exist
     if len(this_game_df) == 0:
-        #print ("Can't find game")
+        print ("Can't find game %s %s %s" % (game_date, home_team, away_team))
         return this_game_df
         
     actual_df = pd.DataFrame()
@@ -51,7 +55,7 @@ def find_odds(odds_df, game_date, home_team, away_team):
             #actual_df = pd.concat([actual_df, row])
             actual_df = actual_df.append(row)
             
-    #print ("Found game, returning odds")
+    print ("Found game, returning odds")
     return actual_df.reset_index()
     
 
@@ -66,6 +70,8 @@ def add_odds(game_df, odds_df):
             home_team = "L.A. Lakers"
         elif row['Home/Neutral'].find("Los Angeles Clippers") != -1:
             home_team = "L.A. Clippers"
+        elif row['Home/Neutral'].find("Portland Trail Blazers") != -1:
+            home_team = "Portland"
         else:            
             home_team = ' '.join(row['Home/Neutral'].split()[:-1])
             
@@ -73,6 +79,8 @@ def add_odds(game_df, odds_df):
             away_team = "L.A. Lakers"
         elif row['Visitor/Neutral'].find("Los Angeles Clippers") != -1:
             away_team = "L.A. Clippers"
+        elif row['Visitor/Neutral'].find("Portland Trail Blazers") != -1:
+            away_team = "Portland"            
         else:            
             away_team = ' '.join(row['Visitor/Neutral'].split()[:-1])
         date_fields = game_date.split()
@@ -193,6 +201,45 @@ def analyze_over_under(game_df):
     game_df["Over_Under_HIT"] = new_col
 
     return (over, under, perfect, skipped)
+
+def plot_over_under(game_df):    
+    # Get count of how many games were over or under the spread
+    sorted_df = game_df.sort_values("EpochDt").reset_index()
+    x_vals = []
+    y_vals = []
+    new_col = []
+    # Get a list of all unique dates for this dataframe
+    all_dates = sorted_df['Date'].unique().tolist()
+    num_dt = 0
+    running_total = 0
+    for dt in all_dates:
+        dt_df = sorted_df[sorted_df['Date']==dt]
+        daily_OU = []
+        for ind, row in dt_df.iterrows():
+            if pd.isnull(row['predicted_over_under']):
+                continue
+            game_points = row['VisitorPTS'] + row['HomePTS']
+            predicted_points = row['predicted_over_under']
+            # If the predicted points were less than the actual points
+            if abs(game_points) > abs(predicted_points):
+                daily_OU.append(1)
+            elif abs(game_points) < abs(predicted_points):
+                daily_OU.append(-1)
+        num_dt+=1                
+        if len(daily_OU) ==0:
+            continue
+        running_total += sum(daily_OU)
+        x_vals.append(num_dt)
+        y_vals.append(running_total)
+
+    print (dt_df)
+    print (len(x_vals))
+    print (x_vals)
+    print (y_vals)
+    p1 = figure(plot_width=1000, tools=TOOLS)
+    p1.line(x_vals, y_vals, legend='Daily_Over_Under')
+
+    show(p1)
 
 def get_over_under_error(game_df):    
     # Get count of how many games were over or under the spread
@@ -406,7 +453,7 @@ def analyze_betting_strats(game_df):
             rest_over_under_map[total_rest] = []
 
         game_points = row['VisitorPTS'] + row['HomePTS']
-        # APpend 1 if it is over the predicted amnt, 0 if not
+        # Append 1 if it is over the predicted amnt, 0 if not
         if game_points > abs(row['predicted_over_under']):
             rest_over_under_map[total_rest].append(1)
         elif game_points < abs(row['predicted_over_under']):
@@ -475,6 +522,7 @@ def process(game_file, odds_dir, file_base, options):
     # Look at all over unders
     (over, under, perfect, skipped) = analyze_over_under(game_df)
     print_over_under(over, under, perfect, skipped)
+    plot_over_under(game_df)
 
     # Look at team-specific over unders
     #analyze_team_over_under(game_df)
