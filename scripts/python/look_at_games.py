@@ -15,6 +15,30 @@ import Tutils
 from bokeh.plotting import figure, show, output_file, save
 
 TOOLS = "pan,box_zoom,reset,save,box_select,undo,redo,crosshair"
+HOME_TEAM = 'HomeTeam'
+HOME_TEAM_PTS = 'HomePoints'
+AWAY_TEAM = 'AwayTeam'
+AWAY_TEAM_PTS = 'AwayPoints'
+
+def read_csv_files(in_dir):
+    """
+    Reads all csv files from the given directory (expects dated subdirs) and 
+      organizes the data into a dataframe which is returned
+    """
+    df = pd.DataFrame()
+    
+    # Get the dated subdirs
+    num_files = 0
+    files = os.listdir(in_dir)
+    for f in files:
+        file_path = "%s\%s" % (in_dir, f)
+        file_df = pd.read_csv(file_path)
+        df = pd.concat([df, file_df])
+        num_files += 1
+
+    df.reset_index(inplace=True)
+    print ("Read %d files" % num_files)
+    return df
 
 def read_odds_dir(odds_dir, file_base):
     """
@@ -45,17 +69,18 @@ def find_odds(odds_df, game_date, home_team, away_team):
 
     # If the game doesn't exist
     if len(this_game_df) == 0:
-        print ("Can't find game %s %s %s" % (game_date, home_team, away_team))
+        #print ("Can't find game %s %s %s" % (Tutils.epoch2tme(game_date("%Y%m%d"), home_team, away_team))
         return this_game_df
-        
+    
     actual_df = pd.DataFrame()
     for ind, row in this_game_df.iterrows():
-        odds_game_date = row['Game_Time'].split()[0]
+        odds_game_date = row['Time'] - (row['Time']%86400)
         if odds_game_date == game_date:
             #actual_df = pd.concat([actual_df, row])
             actual_df = actual_df.append(row)
             
-    print ("Found game, returning odds")
+    #print ("Found game, returning odds")
+    #print (actual_df)
     return actual_df.reset_index()
     
 
@@ -65,31 +90,28 @@ def add_odds(game_df, odds_df):
     predicted_spread_list = []
     predicted_over_under_list = []
     for ind, row in game_df.iterrows():
-        game_date = row['Date']
-        if row['Home/Neutral'].find("Los Angeles Lakers") != -1:
+        game_date = row['GameTime']
+        if row[HOME_TEAM].find("Los Angeles Lakers") != -1:
             home_team = "L.A. Lakers"
-        elif row['Home/Neutral'].find("Los Angeles Clippers") != -1:
+        elif row[HOME_TEAM].find("Los Angeles Clippers") != -1:
             home_team = "L.A. Clippers"
-        elif row['Home/Neutral'].find("Portland Trail Blazers") != -1:
+        elif row[HOME_TEAM].find("Portland Trail Blazers") != -1:
             home_team = "Portland"
         else:            
-            home_team = ' '.join(row['Home/Neutral'].split()[:-1])
+            home_team = ' '.join(row[HOME_TEAM].split()[:-1])
             
-        if row['Visitor/Neutral'].find("Los Angeles Lakers") != -1:
+        if row[AWAY_TEAM].find("Los Angeles Lakers") != -1:
             away_team = "L.A. Lakers"
-        elif row['Visitor/Neutral'].find("Los Angeles Clippers") != -1:
+        elif row[AWAY_TEAM].find("Los Angeles Clippers") != -1:
             away_team = "L.A. Clippers"
-        elif row['Visitor/Neutral'].find("Portland Trail Blazers") != -1:
+        elif row[AWAY_TEAM].find("Portland Trail Blazers") != -1:
             away_team = "Portland"            
         else:            
-            away_team = ' '.join(row['Visitor/Neutral'].split()[:-1])
-        date_fields = game_date.split()
-        # Need to fix this with right conversion
-        mon = 12
-        day = "%02d" % int(date_fields[2])
-        formatted_date = "%s/%s" % (mon, day)
+            away_team = ' '.join(row[AWAY_TEAM].split()[:-1])
 
-        game_odds = find_odds(odds_df, formatted_date, home_team, away_team)
+        game_day = row['EpochDt']
+
+        game_odds = find_odds(odds_df, game_day, home_team, away_team)
 
         
         if (len(game_odds) > 0):
@@ -114,7 +136,7 @@ def analyze_team_over_under(game_df):
     Look at the over under spreads for each team, not considering home/away
     """
     # Get all of the teams that we have
-    all_teams = game_df['Home/Neutral'].append(game_df['Visitor/Neutral']).unique().tolist()
+    all_teams = game_df[HOME_TEAM].append(game_df[AWAY_TEAM]).unique().tolist()
 
     # Loop over each specific team, and see how games they play in compare to the over/under
     team_list = []
@@ -129,12 +151,12 @@ def analyze_team_over_under(game_df):
     
     for team in all_teams:
         # Get all home games for this team
-        team_home_games = game_df[game_df['Home/Neutral']==team]
+        team_home_games = game_df[game_df[HOME_TEAM]==team]
         # Check the over/under spreads
         (home_over, home_under, home_perfect, home_skipped) = analyze_over_under(team_home_games)
         
         # Get all away games for this team
-        team_away_games = game_df[game_df['Visitor/Neutral']==team]
+        team_away_games = game_df[game_df[AWAY_TEAM]==team]
         # Check the over/under spreads
         (away_over, away_under, away_perfect, away_skipped) = analyze_over_under(team_away_games)
         team_list.append(team)
@@ -183,7 +205,7 @@ def analyze_over_under(game_df):
             skipped += 1
             new_col.append(-1)
             continue
-        game_points = row['VisitorPTS'] + row['HomePTS']
+        game_points = row[HOME_TEAM_PTS] + row[AWAY_TEAM_PTS]
         predicted_points = row['predicted_over_under']
         # If the predicted points were less than the actual points
         if abs(game_points) > abs(predicted_points):
@@ -192,34 +214,56 @@ def analyze_over_under(game_df):
         elif abs(game_points) < abs(predicted_points):
             # If the predicted points were more than the game points            
             over += 1
-            new_col.append(0)
+            new_col.append(-1)
         else:
             # If the predicted points matched the game points perfectly
             perfect += 1
-            new_col.append(9)
+            new_col.append(np.nan)
 
     game_df["Over_Under_HIT"] = new_col
 
     return (over, under, perfect, skipped)
 
-def plot_over_under(game_df):    
+def plot_point_based_over_under(game_df):
+    """
+    """
+    non_missing_df = game_df[pd.isnull(game_df['Over_Under_HIT'])==False]
+    all_OUS = non_missing_df['predicted_over_under'].unique().tolist()
+    #range_bins = range(195,230,5)
+    for i in range(195,230,3):
+        min_bound = i-3
+        max_bound = i
+        ou_line_df = non_missing_df[((abs(non_missing_df['predicted_over_under']) > min_bound) &
+                                     (abs(non_missing_df['predicted_over_under']) <= max_bound))]
+        print (min_bound, max_bound, len(ou_line_df), sum(ou_line_df['Over_Under_HIT']))
+    #for OU_line in sorted(all_OUS):
+    #    ou_line_df = non_missing_df[non_missing_df['predicted_over_under']==OU_line]
+    #    print (OU_line, len(ou_line_df), sum(ou_line_df['Over_Under_HIT']))
+    sys.exit()
+
+def plot_over_under(game_df):
+    # Drop all rows where there isn't a predicted_over_under
+    game_df.dropna(subset=['predicted_over_under'], inplace=True)
     # Get count of how many games were over or under the spread
     sorted_df = game_df.sort_values("EpochDt").reset_index()
     x_vals = []
     y_vals = []
+    size_vals = []               
     new_col = []
     # Get a list of all unique dates for this dataframe
-    all_dates = sorted_df['Date'].unique().tolist()
+    all_dates = sorted_df['GameTime'].unique().tolist()
     num_dt = 0
     running_total = 0
     for dt in all_dates:
-        dt_df = sorted_df[sorted_df['Date']==dt]
+        dt_df = sorted_df[sorted_df['GameTime']==dt]
         daily_OU = []
+        sample_size = 0
         for ind, row in dt_df.iterrows():
             if pd.isnull(row['predicted_over_under']):
                 continue
-            game_points = row['VisitorPTS'] + row['HomePTS']
+            game_points = row[AWAY_TEAM_PTS] + row[HOME_TEAM_PTS]
             predicted_points = row['predicted_over_under']
+            sample_size += 1
             # If the predicted points were less than the actual points
             if abs(game_points) > abs(predicted_points):
                 daily_OU.append(1)
@@ -231,13 +275,10 @@ def plot_over_under(game_df):
         running_total += sum(daily_OU)
         x_vals.append(num_dt)
         y_vals.append(running_total)
-
-    print (dt_df)
-    print (len(x_vals))
-    print (x_vals)
-    print (y_vals)
+        size_vals.append(sample_size*2)
     p1 = figure(plot_width=1000, tools=TOOLS)
     p1.line(x_vals, y_vals, legend='Daily_Over_Under')
+    p1.circle(x_vals, y_vals, fill_color='white', size=size_vals)
 
     show(p1)
 
@@ -247,7 +288,7 @@ def get_over_under_error(game_df):
     for ind, row in game_df.iterrows():
         if pd.isnull(row['predicted_over_under']):
             continue
-        game_points = row['VisitorPTS'] + row['HomePTS']
+        game_points = row[HOME_TEAM_PTS] + row[AWAY_TEAM_PTS]
         predicted_points = abs(row['predicted_over_under'])
         diff = abs(game_points - predicted_points)
         error_list.append(diff)
@@ -265,21 +306,21 @@ def get_team_points_map(game_df):
     
     
     # Get all of the teams that we have
-    all_teams = game_df['Home/Neutral'].append(game_df['Visitor/Neutral']).unique().tolist()
+    all_teams = game_df[HOME_TEAM].append(game_df[AWAY_TEAM]).unique().tolist()
     for team in all_teams:
         points_list = []
         # Get every game where this team is the home team
-        team_home_df = game_df[game_df['Home/Neutral']==team]
-        home_points = team_home_df['HomePTS'].mean()
+        team_home_df = game_df[game_df[HOME_TEAM]==team]
+        home_points = team_home_df[HOME_TEAM_PTS].mean()
         points_list.append(home_points)
-        allowed_home_points = team_home_df['VisitorPTS'].mean()
+        allowed_home_points = team_home_df[AWAY_TEAM_PTS].mean()
         points_list.append(allowed_home_points)
         
         # Get every game where this team is the away team
-        team_away_df = game_df[game_df['Visitor/Neutral']==team]
-        away_points = team_away_df['VisitorPTS'].mean()
+        team_away_df = game_df[game_df[AWAY_TEAM]==team]
+        away_points = team_away_df[AWAY_TEAM_PTS].mean()
         points_list.append(away_points)
-        allowed_away_points = team_away_df['HomePTS'].mean()
+        allowed_away_points = team_away_df[HOME_TEAM_PTS].mean()
         points_list.append(allowed_away_points)
         
         avg_scored_points = (home_points + away_points) / 2
@@ -305,8 +346,8 @@ def find_previous_game_home_team(row, ind, game_df):
     """
     """
     # Get all games for this team and sort them on 'Start (ET)'
-    team_df = game_df[((game_df['Home/Neutral'] == row['Home/Neutral']) |
-                       (game_df['Visitor/Neutral'] == row['Home/Neutral']))].sort_values('EpochDt')
+    team_df = game_df[((game_df[HOME_TEAM] == row[HOME_TEAM]) |
+                       (game_df[AWAY_TEAM] == row[HOME_TEAM]))].sort_values('EpochDt')
 
     t_ind = ind
     while t_ind > 0:
@@ -320,8 +361,8 @@ def find_previous_game_away_team(row, ind, game_df):
     """
     """
     # Get all games for this team and sort them on 'Start (ET)'
-    team_df = game_df[((game_df['Home/Neutral'] == row['Visitor/Neutral']) |
-                       (game_df['Visitor/Neutral'] == row['Visitor/Neutral']))].sort_values('EpochDt')
+    team_df = game_df[((game_df[HOME_TEAM] == row[AWAY_TEAM]) |
+                       (game_df[AWAY_TEAM] == row[AWAY_TEAM]))].sort_values('EpochDt')
 
     t_ind = ind
     while t_ind > 0:
@@ -359,11 +400,8 @@ def analyze_team_rest_over_under(game_df):
 
             
 def get_epoch_dt(row):
-    game_date_str = row['Date']
-    game_time_str = row['Start (ET)']
-
-    full_str = "%s %s" % (game_date_str, game_time_str)
-    return Tutils.tme2epoch(full_str, "%a %b %d %Y %I:%M %p")
+    game_date_str = str(int(row['GameTime']))
+    return Tutils.tme2epoch(game_date_str, "%Y%m%d")
 
 def print_statistics(game_df, out_file):
     """
@@ -393,7 +431,7 @@ def get_prior_home_game_avg(row, game_df, points_var, lookback_games):
     """
     """
     # Get a subset of the dataframe that is only for this teams home games
-    home_game_df = game_df[((game_df["Home/Neutral"] == row["Home/Neutral"]) &
+    home_game_df = game_df[((game_df["HomeTeam"] == row["HomeTeam"]) &
                             (game_df["EpochDt"] < row["EpochDt"]))].reset_index()
 
     return home_game_df[points_var][-lookback_games:].mean()
@@ -402,7 +440,7 @@ def get_prior_away_game_avg(row, game_df, points_var, lookback_games):
     """
     """
     # Get a subset of the dataframe that is only for this teams home games
-    away_game_df = game_df[((game_df["Visitor/Neutral"] == row["Visitor/Neutral"]) &
+    away_game_df = game_df[((game_df[AWAY_TEAM] == row[AWAY_TEAM]) &
                             (game_df["EpochDt"] < row["EpochDt"]))].reset_index()
 
     return away_game_df[points_var][-lookback_games:].mean()
@@ -411,7 +449,7 @@ def get_team_rest(row, game_df, key):
     """
     """
     # Get all games for this team
-    team_df = game_df[((game_df['Home/Neutral'] == row[key]) | (game_df['Visitor/Neutral'] == row[key]))]
+    team_df = game_df[((game_df[HOME_TEAM] == row[key]) | (game_df[AWAY_TEAM] == row[key]))]
     time_df = team_df[(team_df['EpochDt'] < row['EpochDt'])].reset_index()
 
     if len(time_df) == 0:
@@ -432,16 +470,16 @@ def analyze_betting_strats(game_df):
     prior_games_to_avg = [1,3]
     for prior_game in prior_games_to_avg:
         var_key = "HomeTeamPointsScoredPast_%d_HomeGame" % prior_game
-        game_df[var_key] = game_df.apply(lambda row: get_prior_home_game_avg(row, game_df, "HomePTS", prior_game),
+        game_df[var_key] = game_df.apply(lambda row: get_prior_home_game_avg(row, game_df, HOME_TEAM_PTS, prior_game),
                                           axis=1)
         var_key = "AwayTeamPointsScoredPast_%d_AwayGame" % prior_game
-        game_df[var_key] = game_df.apply(lambda row: get_prior_away_game_avg(row, game_df, "VisitorPTS", prior_game),
+        game_df[var_key] = game_df.apply(lambda row: get_prior_away_game_avg(row, game_df, AWAY_TEAM_PTS, prior_game),
                                           axis=1)
 
 
     # Add columns for home and away team rest
-    game_df["HomeRest"] = game_df.apply(lambda row: get_team_rest(row, game_df, "Home/Neutral"), axis=1)
-    game_df["AwayRest"] = game_df.apply(lambda row: get_team_rest(row, game_df, "Visitor/Neutral"), axis=1)    
+    game_df["HomeRest"] = game_df.apply(lambda row: get_team_rest(row, game_df, HOME_TEAM), axis=1)
+    game_df["AwayRest"] = game_df.apply(lambda row: get_team_rest(row, game_df, AWAY_TEAM), axis=1)    
 
     rest_over_under_map = {}
     for ind, row in game_df.iterrows():
@@ -452,7 +490,7 @@ def analyze_betting_strats(game_df):
         if total_rest not in rest_over_under_map:
             rest_over_under_map[total_rest] = []
 
-        game_points = row['VisitorPTS'] + row['HomePTS']
+        game_points = row[AWAY_TEAM_PTS] + row[HOME_TEAM_PTS]
         # Append 1 if it is over the predicted amnt, 0 if not
         if game_points > abs(row['predicted_over_under']):
             rest_over_under_map[total_rest].append(1)
@@ -474,7 +512,7 @@ def analyze_betting_strats(game_df):
     #    if pd.isnull(row['predicted_over_under']):
     #        continue
     #    avg_points_scored_past_games = row['HomeTeamPointsScoredPast_1_HomeGame'] + row['AwayTeamPointsScoredPast_1_AwayGame']
-    #    game_points = row['VisitorPTS'] + row['HomePTS']
+    #    game_points = row['AwayPoints'] + row[HOME_TEAM_PTS]
 
     #    print (row)
     #    print ("Average_past_points: %f" % avg_points_scored_past_games)
@@ -495,16 +533,13 @@ def analyze_betting_strats(game_df):
                 
     game_df.to_csv("tmp.csv")
     
-    
-def process(game_file, odds_dir, file_base, options):
+
+def process(game_dir, odds_dir, file_base, options):
     """
     """
     # First read the game file
-    game_df = pd.read_csv(game_file)
-
-    """
-    NOTE -- Add an epoch-time column to the game_df here
-    """
+    game_df = read_csv_files(game_dir)
+    game_df.drop_duplicates(inplace=True)
     game_df['EpochDt'] = game_df.apply(lambda row: get_epoch_dt(row), axis=1)
 
     
@@ -522,6 +557,7 @@ def process(game_file, odds_dir, file_base, options):
     # Look at all over unders
     (over, under, perfect, skipped) = analyze_over_under(game_df)
     print_over_under(over, under, perfect, skipped)
+    #plot_point_based_over_under(game_df)
     plot_over_under(game_df)
 
     # Look at team-specific over unders
@@ -532,12 +568,12 @@ def process(game_file, odds_dir, file_base, options):
     #analyze_team_rest_over_under(game_df)
 
     # Look at betting strategies
-    analyze_betting_strats(game_df)
+    #analyze_betting_strats(game_df)
 
 
 def main():
-    usage_str = "%prog basketball_game_file odds_dir file_base"
-    usage_str = "%s\n\t basketball_game_file : csv file containing final scores of the games" % usage_str
+    usage_str = "%prog basketball_game_dir odds_dir file_base"
+    usage_str = "%s\n\t basketball_game_dir : dir containing csv file containing final scores of the games" % usage_str
     usage_str = "%s\n\t odds_dir : directory with dated subdirs containing csv files of the odds" % usage_str
     usage_str = "%s\n\t file_base : basename of files to grab" % usage_str    
     parser = OptionParser(usage = usage_str)
@@ -550,11 +586,11 @@ def main():
         sys.exit(2)
 
                                   
-    game_file = args[0]
+    game_dir = args[0]
     odds_dir = args[1]
     file_base = args[2]
 
-    process(game_file, odds_dir, file_base, options)
+    process(game_dir, odds_dir, file_base, options)
 
 
 if __name__ == "__main__":
