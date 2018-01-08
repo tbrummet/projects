@@ -11,6 +11,7 @@ from optparse import OptionParser
 import pandas as pd
 import numpy as np
 import Tutils
+import NBA_utils
 
 from bokeh.plotting import figure, show, output_file, save
 
@@ -20,117 +21,7 @@ HOME_TEAM_PTS = 'HomePoints'
 AWAY_TEAM = 'AwayTeam'
 AWAY_TEAM_PTS = 'AwayPoints'
 
-def read_csv_files(in_dir):
-    """
-    Reads all csv files from the given directory (expects dated subdirs) and 
-      organizes the data into a dataframe which is returned
-    """
-    df = pd.DataFrame()
     
-    # Get the dated subdirs
-    num_files = 0
-    files = os.listdir(in_dir)
-    for f in files:
-        file_path = "%s\%s" % (in_dir, f)
-        file_df = pd.read_csv(file_path)
-        df = pd.concat([df, file_df])
-        num_files += 1
-
-    df.reset_index(inplace=True)
-    print ("Read %d files" % num_files)
-    return df
-
-def read_odds_dir(odds_dir, file_base):
-    """
-    Returns a pandas dataframe
-    """
-    odds_df = pd.DataFrame()
-    date_listing = os.listdir(odds_dir)
-    num_files = 0
-    for dt in date_listing:
-        date_path = "%s\%s" % (odds_dir, dt)
-        file_listing = os.listdir(date_path)        
-        for f in file_listing:
-            if not f.startswith(file_base):
-                continue
-            #print ("Reading: %s" % f)
-            file_path = "%s\%s" % (date_path, f)
-            df = pd.read_csv(file_path)
-            odds_df = pd.concat([odds_df, df])
-            num_files += 1
-    print ("Read %d files" % num_files)
-    return odds_df
-
-def find_odds(odds_df, game_date, home_team, away_team):
-    #print ("Looking for game")
-    #print (game_date, home_team , away_team)
-    this_game_df = odds_df[((odds_df['Home_Team']==home_team) &
-                       (odds_df['Away_Team']==away_team))].reset_index()
-
-    # If the game doesn't exist
-    if len(this_game_df) == 0:
-        #print ("Can't find game %s %s %s" % (Tutils.epoch2tme(game_date("%Y%m%d"), home_team, away_team))
-        return this_game_df
-    
-    actual_df = pd.DataFrame()
-    for ind, row in this_game_df.iterrows():
-        odds_game_date = row['Time'] - (row['Time']%86400)
-        if odds_game_date == game_date:
-            #actual_df = pd.concat([actual_df, row])
-            actual_df = actual_df.append(row)
-            
-    #print ("Found game, returning odds")
-    #print (actual_df)
-    return actual_df.reset_index()
-    
-
-def add_odds(game_df, odds_df):
-    """
-    """
-    predicted_spread_list = []
-    predicted_over_under_list = []
-    for ind, row in game_df.iterrows():
-        game_date = row['GameTime']
-        if row[HOME_TEAM].find("Los Angeles Lakers") != -1:
-            home_team = "L.A. Lakers"
-        elif row[HOME_TEAM].find("Los Angeles Clippers") != -1:
-            home_team = "L.A. Clippers"
-        elif row[HOME_TEAM].find("Portland Trail Blazers") != -1:
-            home_team = "Portland"
-        else:            
-            home_team = ' '.join(row[HOME_TEAM].split()[:-1])
-            
-        if row[AWAY_TEAM].find("Los Angeles Lakers") != -1:
-            away_team = "L.A. Lakers"
-        elif row[AWAY_TEAM].find("Los Angeles Clippers") != -1:
-            away_team = "L.A. Clippers"
-        elif row[AWAY_TEAM].find("Portland Trail Blazers") != -1:
-            away_team = "Portland"            
-        else:            
-            away_team = ' '.join(row[AWAY_TEAM].split()[:-1])
-
-        game_day = row['EpochDt']
-
-        game_odds = find_odds(odds_df, game_day, home_team, away_team)
-
-        
-        if (len(game_odds) > 0):
-            # Retrieve the last odds that were recorded for this game
-            predicted_points = game_odds['Over_under_Open'].tolist()[-1]
-            predicted_spread = game_odds['Point_spread_Open'].tolist()[-1]      
-
-            predicted_spread_list.append(predicted_spread)
-            predicted_over_under_list.append(predicted_points)
-        else:
-            predicted_spread_list.append(np.nan)
-            predicted_over_under_list.append(np.nan)
-
-    game_df['predicted_over_under'] = predicted_over_under_list
-    game_df['predicted_spread'] = predicted_spread_list
-    
-    return
-    #analyze_point_spread(games_map)
-
 def analyze_team_over_under(game_df):
     """
     Look at the over under spreads for each team, not considering home/away
@@ -153,12 +44,12 @@ def analyze_team_over_under(game_df):
         # Get all home games for this team
         team_home_games = game_df[game_df[HOME_TEAM]==team]
         # Check the over/under spreads
-        (home_over, home_under, home_perfect, home_skipped) = analyze_over_under(team_home_games)
+        (home_over, home_under, home_perfect, home_skipped) = NBA_utils.analyze_over_under(team_home_games)
         
         # Get all away games for this team
         team_away_games = game_df[game_df[AWAY_TEAM]==team]
         # Check the over/under spreads
-        (away_over, away_under, away_perfect, away_skipped) = analyze_over_under(team_away_games)
+        (away_over, away_under, away_perfect, away_skipped) = NBA_utils.analyze_over_under(team_away_games)
         team_list.append(team)
         home_over_list.append(home_over)
         home_under_list.append(home_under)
@@ -193,36 +84,6 @@ def analyze_team_over_under(game_df):
     df.to_csv(out_file, columns = ['Team', 'Total_over_count', 'Total_under_count',
                                    'Total_perfect_count'], index=False)
     
-def analyze_over_under(game_df):    
-    # Get count of how many games were over or under the spread
-    under = 0
-    over = 0
-    perfect = 0
-    skipped = 0
-    new_col = []
-    for ind, row in game_df.iterrows():
-        if pd.isnull(row['predicted_over_under']):
-            skipped += 1
-            new_col.append(-1)
-            continue
-        game_points = row[HOME_TEAM_PTS] + row[AWAY_TEAM_PTS]
-        predicted_points = row['predicted_over_under']
-        # If the predicted points were less than the actual points
-        if abs(game_points) > abs(predicted_points):
-            under += 1
-            new_col.append(1)
-        elif abs(game_points) < abs(predicted_points):
-            # If the predicted points were more than the game points            
-            over += 1
-            new_col.append(-1)
-        else:
-            # If the predicted points matched the game points perfectly
-            perfect += 1
-            new_col.append(np.nan)
-
-    game_df["Over_Under_HIT"] = new_col
-
-    return (over, under, perfect, skipped)
 
 def plot_point_based_over_under(game_df):
     """
@@ -276,6 +137,7 @@ def plot_over_under(game_df):
         x_vals.append(num_dt)
         y_vals.append(running_total)
         size_vals.append(sample_size*2)
+    print (dt_df)
     p1 = figure(plot_width=1000, tools=TOOLS)
     p1.line(x_vals, y_vals, legend='Daily_Over_Under')
     p1.circle(x_vals, y_vals, fill_color='white', size=size_vals)
@@ -332,14 +194,6 @@ def get_team_points_map(game_df):
 
     return points_map
         
-
-def print_over_under(over, under, perfect, skipped):
-    print ("---------------------------------------")
-    print ("Num times more points were scored than predicted: %d" % under)
-    print ("Num times less points were scored than predicted: %d" % over)
-    print ("Num times vegas predicted the score perfectly: %d" % perfect)
-    print ("Num games couldn't find odds for: %d" % skipped)
-    print ("---------------------------------------")    
 
 
 def find_previous_game_home_team(row, ind, game_df):
@@ -538,16 +392,15 @@ def process(game_dir, odds_dir, file_base, options):
     """
     """
     # First read the game file
-    game_df = read_csv_files(game_dir)
-    game_df.drop_duplicates(inplace=True)
+    game_df = NBA_utils.read_OP_bball_dir(game_dir)
     game_df['EpochDt'] = game_df.apply(lambda row: get_epoch_dt(row), axis=1)
 
     
     # Read all of the odds files
-    odds_df = read_odds_dir(odds_dir, file_base)
+    odds_df = NBA_utils.read_odds_dir(odds_dir, file_base)
 
     # Add the predicted_scores and predicted_over_under spreads to the game df
-    add_odds(game_df, odds_df)
+    NBA_utils.add_odds(game_df, odds_df)
 
     if options.statistics_file:
         print_statistics(game_df, options.statistics_file)
@@ -555,8 +408,8 @@ def process(game_dir, odds_dir, file_base, options):
     print ("Analyzing %d games" % (len(game_df)))
     
     # Look at all over unders
-    (over, under, perfect, skipped) = analyze_over_under(game_df)
-    print_over_under(over, under, perfect, skipped)
+    (over, under, perfect, skipped) = NBA_utils.add_over_under_col(game_df, "HomePoints", "AwayPoints", "Over_Under_HIT")
+    NBA_utils.print_over_under(over, under, perfect, skipped)
     #plot_point_based_over_under(game_df)
     plot_over_under(game_df)
 
