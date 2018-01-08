@@ -197,21 +197,21 @@ def add_over_under_col_threshold(game_df, home_points_col, away_points_col, col_
             skipped += 1
             new_col.append(np.nan)
             continue
-        game_points = row[home_points_col] + row[away_points_col]
+        avg_points = row[home_points_col] + row[away_points_col]
         predicted_points = row['predicted_over_under']
         if threshold > 0:
             # Skip cases where the predicted_points + threshold ISN'T more then the gamepoints
-            if (abs(game_points) < (abs(predicted_points) + threshold)):
+            if (abs(avg_points) < (abs(predicted_points) + threshold)):
                 skipped += 1
-                new_col.append(np.nan)            
+                new_col.append(np.nan)
                 continue
         else:
             # skip cases where the predicted_points + threshold IS greater than predicted            
-            if (abs(game_points) > (abs(predicted_points) + threshold)):
+            if (abs(avg_points) > (abs(predicted_points) + threshold)):
                 skipped += 1
-                new_col.append(np.nan)            
+                new_col.append(np.nan)
                 continue
-            
+        game_points = row[HOME_TEAM_PTS] + row[AWAY_TEAM_PTS]        
         if abs(game_points) > abs(predicted_points):
             # If more points were scored than predicted            
             over += 1
