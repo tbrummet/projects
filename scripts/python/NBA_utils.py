@@ -269,5 +269,5 @@ def make_team_df_map(game_df):
     all_teams = game_df[HOME_TEAM].append(game_df[AWAY_TEAM]).unique().tolist()
     for tm in all_teams:
         team_df_map[tm] = game_df[((game_df[HOME_TEAM]==tm) |
-                                   (game_df[AWAY_TEAM]==tm))].sort_values('EpochDt').reset_index()
+                                   (game_df[AWAY_TEAM]==tm))].sort_values('EpochDt').reset_index(drop=True)
     return team_df_map
