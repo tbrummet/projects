@@ -12,6 +12,7 @@ import NBA_utils
 import Tutils
 import numpy as np
 from bokeh.plotting import figure, show, output_file
+import analyze_ML_model
 
 TOOLS = 'pan,box_zoom,reset,box_select,undo,redo,crosshair,hover'
 
@@ -19,6 +20,8 @@ HOME_TEAM = 'HomeTeam'
 HOME_TEAM_PTS = 'HomePoints'
 AWAY_TEAM = 'AwayTeam'
 AWAY_TEAM_PTS = 'AwayPoints'
+
+PREDICTORS = ['Prior_1_game_score', 'Prior_3game_avg', 'HomeAway']
 
 def look_at_daily_bets(game_df, odds_df, date, options):
     """
@@ -36,12 +39,13 @@ def look_at_daily_bets(game_df, odds_df, date, options):
 
     stat_map = {}
     # Add whatever columns we want to look at
-    for d in range(3,6):
-        for r in range(0, 20):
+    for d in range(3,4):
+        for r in range(3, 20):
             pct_counts = add_col_and_print_threshold_counts(game_df, d, r, team_df_map)
             key = "%d %d" % (d, r)
             stat_map[key] = pct_counts
 
+            
     #
     if options.plot_file:
         plot_over_under_pcts(stat_map, options.plot_file)    
@@ -63,6 +67,15 @@ def look_at_daily_bets(game_df, odds_df, date, options):
                                                                            team_df_map[row['AwayTeam']]),
                                       axis=1)
 
+    game_df.to_csv("game_df.csv")    
+    #
+    # Add the model predicted scores
+    #
+    #model_df = analyze_cubist_model.create_base_df(sorted_game_df)
+    #model_df = analyze_cubist_model.augment_df(model_df)
+    #model = analyze_cubist_model.create_model(model_df)
+    #model_df.to_csv("model_df.csv")
+    
     #
     # Get the vegas lines for this date and iterate over them
     #    
@@ -78,12 +91,14 @@ def look_at_daily_bets(game_df, odds_df, date, options):
         print_last_x_games(game_df, this_epch, 3, 'RemappedAwayTeam', 'Away_Team', row, 'away')
         print_last_x_games(game_df, this_epch, 3, 'RemappedHomeTeam', 'Home_Team', row, 'home')
 
-
         #
         # THIS IS THE KEY RIGHT NOW
         #
         away_team_df = game_df[(game_df['RemappedAwayTeam']==row['Away_Team']) |
                                (game_df['RemappedHomeTeam']==row['Away_Team'])]
+        if (len(away_team_df)==0):
+            print ("Can't make map for team: '%s'" % row['Away_Team'])
+            continue
         if away_team_df.iloc[-1]['RemappedAwayTeam'] == row['Away_Team']:
             away_team_avg = away_team_df.iloc[-1]['AwayTeamAvg3Games']            
         else:
@@ -92,10 +107,13 @@ def look_at_daily_bets(game_df, odds_df, date, options):
         
         home_team_df = game_df[(game_df['RemappedAwayTeam']==row['Home_Team']) |
                                (game_df['RemappedHomeTeam']==row['Home_Team'])]
+        if (len(home_team_df)==0):
+            print ("Can't make map for team: %s" % row['Home_Team'])
+            continue        
         if home_team_df.iloc[-1]['RemappedAwayTeam'] == row['Home_Team']:
             home_team_avg = home_team_df.iloc[-1]['AwayTeamAvg3Games']            
         else:
-            home_team_avg = home_team_df.iloc[-1]['HomeTeamAvg3Games']                    
+            home_team_avg = home_team_df.iloc[-1]['HomeTeamAvg3Games']
             
         print ("%s %s : %f" % (row['Home_Team'], 'TeamAvg3Games', home_team_avg))
         print ("%f" % (home_team_avg+away_team_avg))
@@ -140,6 +158,29 @@ def plot_over_under_pcts(stat_map, plot_file):
     show(p1)
         
 def add_col_and_print_threshold_counts(game_df, num_games, thshld, team_df_map):
+    #
+    # Home/Away spearate
+    #
+    home_col = "HomeTeamHomeAvgPast%sGames" % num_games
+    away_col = "AwayTeamAwayAvgPast%sGames" % num_games    
+    game_df[home_col] = game_df.apply(lambda row: calculate_team_home_avg_past_xdays(row['HomeTeam'],
+                                                                                     num_games,
+                                                                                     row,
+                                                                                     team_df_map[row['HomeTeam']]),
+                                      axis=1)
+    game_df[away_col] = game_df.apply(lambda row: calculate_team_away_avg_past_xdays(row['AwayTeam'],
+                                                                                     num_games,
+                                                                                     row,
+                                                                                     team_df_map[row['AwayTeam']]),
+                                      axis=1)    
+    this_info = NBA_utils.add_over_under_col(game_df, home_col, away_col, ("OU_HIT_%s_avg" % num_games))
+    print (home_col, away_col)
+    print ("NUM GAMES AVG OVER/UNDERS: %d" % num_games)    
+    NBA_utils.print_over_under(this_info[0], this_info[1], this_info[2], this_info[3])
+
+    #
+    # Considering all games
+    #
     home_col = "HomeTeamAvgPast%sGames" % num_games
     away_col = "AwayTeamAvgPast%sGames" % num_games    
     game_df[home_col] = game_df.apply(lambda row: calculate_team_avg_past_xdays(row['HomeTeam'],
@@ -152,19 +193,23 @@ def add_col_and_print_threshold_counts(game_df, num_games, thshld, team_df_map):
                                                                                 row,
                                                                                 team_df_map[row['AwayTeam']]),
                                       axis=1)
-    
-    #
-    #
-    #
     this_info = NBA_utils.add_over_under_col(game_df, home_col, away_col, ("OU_HIT_%s_avg" % num_games))
+    print (home_col, away_col)    
     print ("NUM GAMES AVG OVER/UNDERS: %d" % num_games)    
     NBA_utils.print_over_under(this_info[0], this_info[1], this_info[2], this_info[3])
+
+    #
+    # Look at the counts for the home/away games
+    #
+    home_col = "HomeTeamHomeAvgPast%sGames" % num_games
+    away_col = "AwayTeamAwayAvgPast%sGames" % num_games        
     #
     # Check O/U when teams are averaging more than thshld points over the spread
     #
     this_info = NBA_utils.add_over_under_col_threshold(game_df, home_col, away_col,
                                                        ("OU_HIT_%s_avg_%d" % (num_games, thshld)),
                                                        thshld)
+    print (home_col, away_col)    
     print ("NUM GAMES AVG OVER/UNDERS WHEN AVG > spread+%d: %d games" % (thshld, num_games))
     NBA_utils.print_over_under(this_info[0], this_info[1], this_info[2], this_info[3])
     if this_info[0]+this_info[0]==0:
@@ -182,6 +227,7 @@ def add_col_and_print_threshold_counts(game_df, num_games, thshld, team_df_map):
     this_info = NBA_utils.add_over_under_col_threshold(game_df, home_col, away_col,
                                                        ("OU_HIT_%s_avg_%d" % (num_games, -thshld)),
                                                        -thshld)
+    print (home_col, away_col)    
     print ("NUM GAMES AVG OVER/UNDERS WHEN AVG < spread-%d: %d games" % (thshld, num_games))    
     NBA_utils.print_over_under(this_info[0], this_info[1], this_info[2], this_info[3])
     if this_info[0]+this_info[0]==0:
@@ -224,6 +270,31 @@ def calculate_team_avg_past_xdays(team_name, num_games, row, team_df):
             team_points.append(rw['HomePoints'])
     return (sum(team_points)/len(team_points))
 
+def calculate_team_home_avg_past_xdays(team_name, num_games, row, team_df):
+    """
+    """
+    # Get the last x games
+    last_x_games = team_df[((team_df['EpochDt'] < row['EpochDt']) &
+                            (team_df['HomeTeam']== team_name))][-num_games:]
+    
+    # If there aren't at least x games, return missing
+    if len(last_x_games) < num_games:
+        return np.nan
+    
+    return last_x_games['HomePoints'].mean()
+
+def calculate_team_away_avg_past_xdays(team_name, num_games, row, team_df):
+    """
+    """
+    # Get the last x games
+    last_x_games = team_df[((team_df['EpochDt'] < row['EpochDt']) &
+                            (team_df['AwayTeam']== team_name))][-num_games:]    
+    if len(last_x_games) < num_games:
+        return np.nan
+    
+    return last_x_games['HomePoints'].mean()
+
+
 def calculate_team_avg_xdays(team_name, num_games, row, team_df):
     """
     """
@@ -258,7 +329,7 @@ def get_epoch_dt(row):
     game_date_str = str(int(row['GameTime']))
     return Tutils.tme2epoch(game_date_str, "%Y%m%d")
     
-def process(game_dir, odds_dir, odds_base, date, options):
+def process(game_dir, odds_dir, odds_base, date, league, options):
     """
     """
     #
@@ -266,23 +337,31 @@ def process(game_dir, odds_dir, odds_base, date, options):
     #
     game_df = NBA_utils.read_OP_bball_dir(game_dir)
     game_df['EpochDt'] = game_df.apply(lambda row: get_epoch_dt(row), axis=1)
-    # Add remapped home and away team names for matching from odds -> game
-    game_df['RemappedAwayTeam'] = game_df.apply(lambda row: NBA_utils.remap_team_name(row['AwayTeam']),
-                                                axis=1)
-    game_df['RemappedHomeTeam'] = game_df.apply(lambda row: NBA_utils.remap_team_name(row['HomeTeam']),
-                                                axis=1)    
-
+    if league=='NBA':
+        # Add remapped home and away team names for matching from odds -> game
+        game_df['RemappedAwayTeam'] = game_df.apply(lambda row: NBA_utils.remap_team_name(row['AwayTeam']),
+                                                    axis=1)
+        game_df['RemappedHomeTeam'] = game_df.apply(lambda row: NBA_utils.remap_team_name(row['HomeTeam']),
+                                                    axis=1)    
+    else:
+        # Add remapped home and away team names for matching from odds -> game
+        game_df['RemappedAwayTeam'] = game_df.apply(lambda row: NBA_utils.remap_NCAA_team_name(row['AwayTeam']),
+                                                    axis=1)
+        game_df['RemappedHomeTeam'] = game_df.apply(lambda row: NBA_utils.remap_NCAA_team_name(row['HomeTeam']),
+                                                    axis=1)    
+        
+        
     #
     # Read all of the odds files and add the game date
     #
     odds_df = NBA_utils.read_odds_dir(odds_dir, odds_base)
     NBA_utils.add_odds_game_date(odds_df)
-
+    odds_df.to_csv("odds_df.csv")
     #
     # Add the predicted_scores and predicted_over_under spreads to the game df
     #
-    NBA_utils.add_odds(game_df, odds_df)
-
+    NBA_utils.add_odds(game_df, odds_df, league)
+    
     # Add the 'Over_under_HIT' column to the dataframe
     # -1 = Less points scored than expected
     # 1 = More points scored than expected
@@ -299,20 +378,21 @@ def process(game_dir, odds_dir, odds_base, date, options):
 
     # Analyze this dates bets
     look_at_daily_bets(game_df, odds_df, date, options)
-    
+    game_df.to_csv("game_df.csv")    
 
 def main():
-    usage_str = "%prog basketball_game_dir odds_dir file_base date"
+    usage_str = "%prog basketball_game_dir odds_dir file_base league date"
     usage_str = "%s\n\t basketball_game_dir : dir containing csv file containing final scores of the games" % usage_str
     usage_str = "%s\n\t odds_dir : directory with dated subdirs containing csv files of the odds" % usage_str
-    usage_str = "%s\n\t date : date of bets to look at (YYYYmmdd)" % usage_str    
-    usage_str = "%s\n\t file_base : basename of files to grab" % usage_str    
+    usage_str = "%s\n\t file_base : basename of files to grab" % usage_str
+    usage_str = "%s\n\t league : ['NBA' or 'NCAA']" % usage_str
+    usage_str = "%s\n\t date : date of bets to look at (YYYYmmdd)" % usage_str        
     parser = OptionParser(usage = usage_str)
     parser.add_option("-p", "--plot_file", dest="plot_file", help="make a plots")
         
     (options, args) = parser.parse_args()
     
-    if len(args) < 4:
+    if len(args) < 5:
         parser.print_help()
         sys.exit(2)
 
@@ -320,9 +400,10 @@ def main():
     game_dir = args[0]
     odds_dir = args[1]
     odds_base = args[2]
-    date = args[3]
+    league = args[3]
+    date = args[4]
 
-    process(game_dir, odds_dir, odds_base, date, options)
+    process(game_dir, odds_dir, odds_base, date, league, options)
 
 
 if __name__ == "__main__":

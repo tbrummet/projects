@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# Filename: Tutils.py
+# Filename: NBA_utils.py
 #  Some useful functions, put together by Tom Brummet
 
 # ============================================================================== #
@@ -25,6 +25,30 @@ HOME_TEAM = 'HomeTeam'
 HOME_TEAM_PTS = 'HomePoints'
 AWAY_TEAM = 'AwayTeam'
 AWAY_TEAM_PTS = 'AwayPoints'
+
+NCAA_NAME_MAP = {
+    "UC Santa Barb." :  "UC Santa Barbara",
+    "Army West Point" :  "Army",
+    "Saint Joseph's" :  "St. Josephs (PA)",
+    "NC State" :  "North Carolina State",
+    "Ohio St." :  "Ohio State",
+    "USC" :  "Southern Cal",
+    "Monmouth" :  "Monmouth (NJ)",
+    "St. Peter's" :  "St. Peters",
+    "Sacramento St." :  "CS Sacramento",
+    "Montana St." :  "Montana State",
+    "CSUN" :  "CS Northridge",
+    "Long Beach St." :  "CS Long Beach",
+    "CSU Fullerton" :  "CS Fullerton",
+    "CSU Bakersfield" :  "CS Bakersfield",    
+    "FIU" :  "Florida Intl",
+    "Saint Joseph's" :  "St. Josephs (PA)",
+    "LSU" : "Louisiana State",
+    "UNI" : "Northern Iowa",
+    "UNC-Greensboro" : "UNC Greensboro",
+    "Eastern Wash." : "Eastern Washington",
+    "St. Mary's (Cal.)" : "St. Marys (CA)"
+    }
 
 def read_OP_bball_dir(in_dir):
     """
@@ -78,16 +102,28 @@ def remap_team_name(team_name):
     else:            
         team = ' '.join(team_name.split()[:-1])
     return team
-        
-def add_odds(game_df, odds_df):
+
+def remap_NCAA_team_name(team_name):
+    """
+    """
+    if team_name in NCAA_NAME_MAP:
+        return NCAA_NAME_MAP[team_name]
+    else:
+        return team_name
+
+def add_odds(game_df, odds_df, league):
     """
     """
     predicted_spread_list = []
     predicted_over_under_list = []
     for ind, row in game_df.iterrows():
         game_date = row['GameTime']
-        home_team = remap_team_name(row[HOME_TEAM])
-        away_team = remap_team_name(row[AWAY_TEAM])
+        if league=='NBA':
+            home_team = remap_team_name(row[HOME_TEAM])
+            away_team = remap_team_name(row[AWAY_TEAM])
+        else:
+            home_team = remap_NCAA_team_name(row[HOME_TEAM])
+            away_team = remap_NCAA_team_name(row[AWAY_TEAM])
 
         game_day = row['EpochDt']
 
@@ -118,12 +154,12 @@ def find_odds(odds_df, game_date, home_team, away_team):
 
     # If the game doesn't exist
     if len(this_game_df) == 0:
-        #print ("Can't find game %s %s %s" % (Tutils.epoch2tme(game_date("%Y%m%d"), home_team, away_team))
+        #print ("Can't find game %s %s %s" % (Tutils.epoch2tme(game_date, "%Y%m%d"), home_team, away_team))
         return this_game_df
     
     actual_df = pd.DataFrame()
     for ind, row in this_game_df.iterrows():
-        odds_game_date = row['Time'] - (row['Time']%86400)
+        odds_game_date = row['GameDateEpoch']
         if odds_game_date == game_date:
             #actual_df = pd.concat([actual_df, row])
             actual_df = actual_df.append(row)
@@ -211,7 +247,7 @@ def add_over_under_col_threshold(game_df, home_points_col, away_points_col, col_
                 skipped += 1
                 new_col.append(np.nan)
                 continue
-        game_points = row[HOME_TEAM_PTS] + row[AWAY_TEAM_PTS]        
+        game_points = row[HOME_TEAM_PTS] + row[AWAY_TEAM_PTS]
         if abs(game_points) > abs(predicted_points):
             # If more points were scored than predicted            
             over += 1
@@ -271,3 +307,72 @@ def make_team_df_map(game_df):
         team_df_map[tm] = game_df[((game_df[HOME_TEAM]==tm) |
                                    (game_df[AWAY_TEAM]==tm))].sort_values('EpochDt').reset_index(drop=True)
     return team_df_map
+
+def get_prior_score(row, base_df, lookback_games):
+    # Get prior games for this team
+    team_df = base_df[((base_df["Team"] == row["Team"]) &
+                       (base_df["GameTime"] < row["GameTime"]))].sort_values("GameTime").reset_index()
+    if len(team_df) == 0:
+        return np.nan
+    elif len(team_df) < lookback_games:
+        return np.nan
+    else:
+        # Return the most recent value
+        last_ind = len(team_df) - lookback_games
+        return team_df.loc[last_ind]["PointsScored"]
+
+def get_prior_game_avg(row, base_df, lookback_games):
+    # Get prior games for this team
+    team_df = base_df[((base_df["Team"] == row["Team"]) &
+                       (base_df["GameTime"] < row["GameTime"]))].sort_values("GameTime").reset_index()
+    if len(team_df) == 0:
+        return np.nan
+    elif len(team_df) < lookback_games:
+        return np.nan
+    else:
+        # Return the most recent value
+        last_ind = len(team_df) - lookback_games
+        return team_df.iloc[-3:]["PointsScored"].mean()
+    
+    
+def print_threshold_counts(home_col, away_col, threshold, game_df, col_name):
+    """
+    Prints how many times the 'home_col'+'away_col' beat the predicted based on the threshold
+    """
+    #
+    # Check O/U when teams are averaging more than thshld points over the spread
+    #
+    this_info = add_over_under_col_threshold(game_df, home_col, away_col,
+                                                       ("OU_HIT_%s_%d" % (col_name, threshold)),
+                                                       threshold)
+    print ("NUM GAMES AVG OVER/UNDERS WHEN AVG > spread+%d: %s" % (threshold, col_name))
+    print_over_under(this_info[0], this_info[1], this_info[2], this_info[3])
+    if this_info[0]+this_info[0]==0:
+        oo_pct = np.nan
+        oo_count = np.nan
+    elif this_info[1] == 0:
+        oo_pct = 5
+        oo_count = this_info[0]+this_info[1]        
+    else:
+        oo_pct = this_info[0]/this_info[1]
+        oo_count = this_info[0]+this_info[1]
+    #
+    # Check O/U when teams are averaging thshld points less than the spread
+    #
+    this_info = add_over_under_col_threshold(game_df, home_col, away_col,
+                                                       ("OU_HIT_%s_%d" % (col_name, -threshold)),
+                                                       -threshold)
+    print ("NUM GAMES AVG OVER/UNDERS WHEN AVG < spread-%d: %s" % (threshold, col_name))    
+    print_over_under(this_info[0], this_info[1], this_info[2], this_info[3])
+    if this_info[0]+this_info[0]==0:
+        uu_pct = np.nan
+        uu_count = np.nan
+    elif this_info[0] == 0:
+        uu_pct = 5
+        uu_count = this_info[0]+this_info[1]        
+    else:
+        uu_pct = this_info[1]/this_info[0]
+        uu_count = this_info[1]+this_info[0]
+
+    return (oo_pct, oo_count, uu_pct, uu_count)
+    
