@@ -40,11 +40,10 @@ def look_at_daily_bets(game_df, odds_df, date, options):
     stat_map = {}
     # Add whatever columns we want to look at
     for d in range(3,4):
-        for r in range(3, 20):
+        for r in range(3, 15):
             pct_counts = add_col_and_print_threshold_counts(game_df, d, r, team_df_map)
             key = "%d %d" % (d, r)
             stat_map[key] = pct_counts
-
             
     #
     if options.plot_file:
@@ -66,8 +65,20 @@ def look_at_daily_bets(game_df, odds_df, date, options):
                                                                            row,
                                                                            team_df_map[row['AwayTeam']]),
                                       axis=1)
-
-    game_df.to_csv("game_df.csv")    
+    """
+    home_col = "HomeTeamHomeAvg%sGames" % num_games
+    game_df[home_col] = game_df.apply(lambda row: calculate_team_home_avg_xdays(row['HomeTeam'],
+                                                                                num_games,
+                                                                                row,
+                                                                                team_df_map[row['HomeTeam']]),
+                                      axis=1)
+    away_col = "AwayTeamAwayAvg%sGames" % num_games
+    game_df[away_col] = game_df.apply(lambda row: calculate_team_away_avg_xdays(row['AwayTeam'],
+                                                                                num_games,
+                                                                                row,
+                                                                                team_df_map[row['AwayTeam']]),
+                                      axis=1)
+    """
     #
     # Add the model predicted scores
     #
@@ -100,9 +111,9 @@ def look_at_daily_bets(game_df, odds_df, date, options):
             print ("Can't make map for team: '%s'" % row['Away_Team'])
             continue
         if away_team_df.iloc[-1]['RemappedAwayTeam'] == row['Away_Team']:
-            away_team_avg = away_team_df.iloc[-1]['AwayTeamAvg3Games']            
+            away_team_avg = away_team_df.iloc[-1]['AwayTeamAvg3Games']
         else:
-            away_team_avg = away_team_df.iloc[-1]['HomeTeamAvg3Games']            
+            away_team_avg = away_team_df.iloc[-1]['HomeTeamAvg3Games']
         print ("%s %s : %f" % (row['Away_Team'], 'TeamAvg3Games', away_team_avg))
         
         home_team_df = game_df[(game_df['RemappedAwayTeam']==row['Home_Team']) |
@@ -117,11 +128,30 @@ def look_at_daily_bets(game_df, odds_df, date, options):
             
         print ("%s %s : %f" % (row['Home_Team'], 'TeamAvg3Games', home_team_avg))
         print ("%f" % (home_team_avg+away_team_avg))
-        if (home_team_avg+away_team_avg) - abs(row['Over_under_Open']) > 10:
+        if (home_team_avg+away_team_avg) - abs(row['Over_under_Open']) >= 8:
             print ("YOOO BET ON THE OVER HERE: BEEN AVERAGING %d!!!" % (home_team_avg+away_team_avg))
-        if (abs(row['Over_under_Open']) - (home_team_avg+away_team_avg)) > 10:
-            print ("YOOO BET ON THE UNDER HERE: BEEN AVERAGING %d!!!" % (home_team_avg+away_team_avg))                   
+        if (abs(row['Over_under_Open']) - (home_team_avg+away_team_avg)) >= 8:
+            print ("YOOO BET ON THE UNDER HERE: BEEN AVERAGING %d!!!" % (home_team_avg+away_team_avg))
+        # ----------------------------------------------------------------------------------------------
+        # ----------------------------------------------------------------------------------------------
+        # ----------------------------------------------------------------------------------------------
+        """
+        away_team_df = game_df[(game_df['RemappedAwayTeam']==row['Away_Team'])]
+        away_team_avg = away_team_df.iloc[-1]['AwayTeamAwayAvg3Games']
+        print ("%s %s : %f" % (row['Away_Team'], 'TeamAwayAvg3Games', away_team_avg))
+        
+        home_team_df = game_df[(game_df['RemappedHomeTeam']==row['Home_Team'])]
+        if (len(home_team_df)==0):
+            print ("Can't make map for team: %s" % row['Home_Team'])
+            continue        
+        home_team_avg = home_team_df.iloc[-1]['HomeTeamHomeAvg3Games']            
             
+        print ("%s %s : %f" % (row['Home_Team'], 'TeamHomeAvg3Games', home_team_avg))
+        print ("%f" % (home_team_avg+away_team_avg))
+        if (home_team_avg+away_team_avg) > abs(row['Over_under_Open']):
+            print ("YOOO BET ON THE OVER HERE: BEEN AVERAGING %d!!!" % (home_team_avg+away_team_avg))
+        """
+        
         
 def plot_over_under_pcts(stat_map, plot_file):
     """
@@ -173,7 +203,7 @@ def add_col_and_print_threshold_counts(game_df, num_games, thshld, team_df_map):
                                                                                      row,
                                                                                      team_df_map[row['AwayTeam']]),
                                       axis=1)    
-    this_info = NBA_utils.add_over_under_col(game_df, home_col, away_col, ("OU_HIT_%s_avg" % num_games))
+    this_info = NBA_utils.add_over_under_col(game_df, home_col, away_col, ("OU_HIT_HA_%s_avg" % num_games))
     print (home_col, away_col)
     print ("NUM GAMES AVG OVER/UNDERS: %d" % num_games)    
     NBA_utils.print_over_under(this_info[0], this_info[1], this_info[2], this_info[3])
@@ -201,8 +231,8 @@ def add_col_and_print_threshold_counts(game_df, num_games, thshld, team_df_map):
     #
     # Look at the counts for the home/away games
     #
-    home_col = "HomeTeamHomeAvgPast%sGames" % num_games
-    away_col = "AwayTeamAwayAvgPast%sGames" % num_games        
+    #home_col = "HomeTeamHomeAvgPast%sGames" % num_games
+    #away_col = "AwayTeamAwayAvgPast%sGames" % num_games        
     #
     # Check O/U when teams are averaging more than thshld points over the spread
     #
@@ -292,7 +322,31 @@ def calculate_team_away_avg_past_xdays(team_name, num_games, row, team_df):
     if len(last_x_games) < num_games:
         return np.nan
     
+    return last_x_games['AwayPoints'].mean()
+
+def calculate_team_home_avg_xdays(team_name, num_games, row, team_df):
+    """
+    """
+    # Get the last x games
+    last_x_games = team_df[((team_df['EpochDt'] <= row['EpochDt']) &
+                            (team_df['HomeTeam']== team_name))][-num_games:]
+    
+    # If there aren't at least x games, return missing
+    if len(last_x_games) < num_games:
+        return np.nan
+    
     return last_x_games['HomePoints'].mean()
+
+def calculate_team_away_avg_xdays(team_name, num_games, row, team_df):
+    """
+    """
+    # Get the last x games
+    last_x_games = team_df[((team_df['EpochDt'] <= row['EpochDt']) &
+                            (team_df['AwayTeam']== team_name))][-num_games:]    
+    if len(last_x_games) < num_games:
+        return np.nan
+    
+    return last_x_games['AwayPoints'].mean()
 
 
 def calculate_team_avg_xdays(team_name, num_games, row, team_df):

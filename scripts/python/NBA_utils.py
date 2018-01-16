@@ -117,7 +117,6 @@ def add_odds(game_df, odds_df, league):
     predicted_spread_list = []
     predicted_over_under_list = []
     for ind, row in game_df.iterrows():
-        game_date = row['GameTime']
         if league=='NBA':
             home_team = remap_team_name(row[HOME_TEAM])
             away_team = remap_team_name(row[AWAY_TEAM])
@@ -128,7 +127,6 @@ def add_odds(game_df, odds_df, league):
         game_day = row['EpochDt']
 
         game_odds = find_odds(odds_df, game_day, home_team, away_team)
-
         
         if (len(game_odds) > 0):
             # Retrieve the last odds that were recorded for this game
@@ -148,25 +146,25 @@ def add_odds(game_df, odds_df, league):
         
 def find_odds(odds_df, game_date, home_team, away_team):
     #print ("Looking for game")
-    #print (game_date, home_team , away_team)
+    #print (game_date, home_team, away_team)
     this_game_df = odds_df[((odds_df['Home_Team']==home_team) &
-                       (odds_df['Away_Team']==away_team))].reset_index()
+                            (odds_df['Away_Team']==away_team) &
+                            (odds_df["GameDateEpoch"]==game_date))].reset_index()
 
     # If the game doesn't exist
-    if len(this_game_df) == 0:
-        #print ("Can't find game %s %s %s" % (Tutils.epoch2tme(game_date, "%Y%m%d"), home_team, away_team))
-        return this_game_df
-    
-    actual_df = pd.DataFrame()
-    for ind, row in this_game_df.iterrows():
-        odds_game_date = row['GameDateEpoch']
-        if odds_game_date == game_date:
-            #actual_df = pd.concat([actual_df, row])
-            actual_df = actual_df.append(row)
-            
-    #print ("Found game, returning odds")
-    #print (actual_df)
-    return actual_df.reset_index()
+    #if len(this_game_df) == 0:
+    #    print ("Can't find game %s %s %s" % (Tutils.epoch2tme(game_date, "%Y%m%d"), home_team, away_team))
+    #else:
+    #    print ("Found Game, Returning odds")
+    #print (this_game_df)
+    return (this_game_df.reset_index())
+
+#    actual_df = pd.DataFrame()
+#    for ind, row in this_game_df.iterrows():
+#        odds_game_date = row['GameDateEpoch']
+#        if odds_game_date == game_date:
+#            #actual_df = pd.concat([actual_df, row])
+#            actual_df = actual_df.append(row)
 
 def get_team_over_under(game_df, team, home_team_str, away_team_str):
     """
@@ -194,21 +192,32 @@ def add_over_under_col(game_df, home_points_col, away_points_col, col_name):
             skipped += 1
             new_col.append(np.nan)
             continue
-        game_points = row[home_points_col] + row[away_points_col]
+        guess_points = row[home_points_col] + row[away_points_col]
+        
+        actual_points = row[HOME_TEAM_PTS] + row[AWAY_TEAM_PTS]
         predicted_points = row['predicted_over_under']
-        if abs(game_points) > abs(predicted_points):
+        # If the modeled points were greater than the over under, AND more points
+        #    were scored than the over under, add a point
+        if (abs(guess_points) > abs(predicted_points) and
+            abs(actual_points) > abs(predicted_points)):
             # If more points were scored than predicted            
             over += 1
             new_col.append(1)
-        elif abs(game_points) < abs(predicted_points):
+        # If the modeled points were less than the over under, AND less points
+        #    were scored than the over under, add a point            
+        elif (abs(guess_points) < abs(predicted_points) and
+              abs(actual_points) < abs(predicted_points)):
             # If less points were scored than predicted
             under += 1
             new_col.append(-1)
-        else:
+        elif (abs(actual_points) == abs(predicted_points)):
             # If the predicted points matched the game points perfectly
             perfect += 1
             new_col.append(0)
-
+        else:
+            skipped+=1
+            new_col.append(np.nan)
+            
     game_df[col_name] = new_col
 
     return (over, under, perfect, skipped)
@@ -287,8 +296,8 @@ def get_odds_dt(row):
     year = Tutils.epoch2tme(row['Time'], "%Y")
     dt_str = row['Game_Time'].split()
     (mon,day) = dt_str[0].split("/")
-    if int(mon) > 6:
-        year = int(year)-1
+    #if int(mon) > 6:
+    #    year = int(year)-1
     out_str = "%s%s%s" % (year, mon, day)
     return Tutils.tme2epoch(out_str, "%Y%m%d")
 
