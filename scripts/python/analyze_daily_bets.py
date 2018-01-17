@@ -39,8 +39,8 @@ def look_at_daily_bets(game_df, odds_df, date, options):
 
     stat_map = {}
     # Add whatever columns we want to look at
-    for d in range(3,4):
-        for r in range(3, 15):
+    for d in range(3,6):
+        for r in range(3, 20):
             pct_counts = add_col_and_print_threshold_counts(game_df, d, r, team_df_map)
             key = "%d %d" % (d, r)
             stat_map[key] = pct_counts
@@ -202,8 +202,11 @@ def add_col_and_print_threshold_counts(game_df, num_games, thshld, team_df_map):
                                                                                      num_games,
                                                                                      row,
                                                                                      team_df_map[row['AwayTeam']]),
-                                      axis=1)    
-    this_info = NBA_utils.add_over_under_col(game_df, home_col, away_col, ("OU_HIT_HA_%s_avg" % num_games))
+                                      axis=1)
+    #
+    # Look at the counts for number of times home_col + away_col AND game_df either greater than or less than predicted
+    #
+    this_info = NBA_utils.add_OU_HIT_col(game_df, home_col, away_col, ("OU_HIT_HA_%s_avg" % num_games))
     print (home_col, away_col)
     print ("NUM GAMES AVG OVER/UNDERS: %d" % num_games)    
     NBA_utils.print_over_under(this_info[0], this_info[1], this_info[2], this_info[3])
@@ -223,7 +226,7 @@ def add_col_and_print_threshold_counts(game_df, num_games, thshld, team_df_map):
                                                                                 row,
                                                                                 team_df_map[row['AwayTeam']]),
                                       axis=1)
-    this_info = NBA_utils.add_over_under_col(game_df, home_col, away_col, ("OU_HIT_%s_avg" % num_games))
+    this_info = NBA_utils.add_OU_HIT_col(game_df, home_col, away_col, ("OU_HIT_%s_avg" % num_games))
     print (home_col, away_col)    
     print ("NUM GAMES AVG OVER/UNDERS: %d" % num_games)    
     NBA_utils.print_over_under(this_info[0], this_info[1], this_info[2], this_info[3])

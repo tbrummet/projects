@@ -192,21 +192,18 @@ def add_over_under_col(game_df, home_points_col, away_points_col, col_name):
             skipped += 1
             new_col.append(np.nan)
             continue
-        guess_points = row[home_points_col] + row[away_points_col]
         
-        actual_points = row[HOME_TEAM_PTS] + row[AWAY_TEAM_PTS]
+        actual_points = row[home_points_col] + row[away_points_col]
         predicted_points = row['predicted_over_under']
         # If the modeled points were greater than the over under, AND more points
         #    were scored than the over under, add a point
-        if (abs(guess_points) > abs(predicted_points) and
-            abs(actual_points) > abs(predicted_points)):
+        if abs(actual_points) > abs(predicted_points):
             # If more points were scored than predicted            
             over += 1
             new_col.append(1)
         # If the modeled points were less than the over under, AND less points
         #    were scored than the over under, add a point            
-        elif (abs(guess_points) < abs(predicted_points) and
-              abs(actual_points) < abs(predicted_points)):
+        elif abs(actual_points) < abs(predicted_points):
             # If less points were scored than predicted
             under += 1
             new_col.append(-1)
@@ -221,15 +218,13 @@ def add_over_under_col(game_df, home_points_col, away_points_col, col_name):
     game_df[col_name] = new_col
 
     return (over, under, perfect, skipped)
+    
 
-def add_over_under_col_threshold(game_df, home_points_col, away_points_col, col_name, threshold):
+def add_OU_HIT_col(game_df, home_points_col, away_points_col, col_name):
     """
-    Same as 'add_over_under_col' but only looks at games where
-    the difference is over a certain threshold
     """
-    # Get count of how many games were over or under the spread
-    under = 0
-    over = 0
+    hit = 0
+    missed = 0
     perfect = 0
     skipped = 0
     new_col = []
@@ -243,25 +238,87 @@ def add_over_under_col_threshold(game_df, home_points_col, away_points_col, col_
             new_col.append(np.nan)
             continue
         avg_points = row[home_points_col] + row[away_points_col]
-        predicted_points = row['predicted_over_under']
+        game_points = row[HOME_TEAM_PTS] + row[AWAY_TEAM_PTS]
+        predicted_points = abs(row['predicted_over_under'])
+        if avg_points > predicted_points:
+            if game_points > predicted_points:
+                hit +=1
+                new_col.append(1)
+            elif game_points < predicted_points:
+                missed += 1
+                new_col.append(-1)
+            else:
+                perfect += 1
+                new_col.append(0)            
+        elif avg_points < predicted_points:
+            if game_points < predicted_points:
+                hit += 1
+                new_col.append(1)
+                continue
+            elif game_points > predicted_points:
+                missed += 1
+                new_col.append(-1)
+                continue
+            else:
+                perfect += 1
+                new_col.append(0)
+        else:
+            skipped += 1
+            new_col.append(np.nan)
+            
+    game_df[col_name] = new_col
+
+    return (hit, missed, perfect, skipped)                
+            
+def add_over_under_col_threshold(game_df, home_points_col, away_points_col, col_name, threshold):
+    """
+    Same as 'add_over_under_col' but only looks at games where
+    the difference is over a certain threshold
+    """
+    # Get count of how many games were over or under the spread
+    under = 0
+    over = 0
+    perfect = 0
+    skipped = 0
+    new_col = []
+    for ind, row in game_df.iterrows():
+        #
+        # If we are missing any of these fields, skip
+        # 
+        if pd.isnull(row['predicted_over_under']):
+            skipped += 1
+            new_col.append(np.nan)
+            continue
+        if pd.isnull(row[home_points_col]) or pd.isnull(row[away_points_col]):
+            skipped += 1
+            new_col.append(np.nan)
+            continue
+        avg_points = row[home_points_col] + row[away_points_col]
+        predicted_points = abs(row['predicted_over_under'])
+        #
+        # If there is a posative threshold --
+        #      ignore all cases where the avg was less than predicted+threshold
+        #
         if threshold > 0:
-            # Skip cases where the predicted_points + threshold ISN'T more then the gamepoints
-            if (abs(avg_points) < (abs(predicted_points) + threshold)):
+            if (abs(avg_points) < (predicted_points + threshold)):
                 skipped += 1
                 new_col.append(np.nan)
                 continue
+        #
+        # If there is a negative threshold --
+        #      ignore all cases where the avg was more than predicted+threshold
+        #
         else:
-            # skip cases where the predicted_points + threshold IS greater than predicted            
-            if (abs(avg_points) > (abs(predicted_points) + threshold)):
+            if (abs(avg_points) > (predicted_points + threshold)):
                 skipped += 1
                 new_col.append(np.nan)
                 continue
         game_points = row[HOME_TEAM_PTS] + row[AWAY_TEAM_PTS]
-        if abs(game_points) > abs(predicted_points):
+        if abs(game_points) > predicted_points:
             # If more points were scored than predicted            
             over += 1
             new_col.append(1)
-        elif abs(game_points) < abs(predicted_points):
+        elif abs(game_points) < predicted_points:
             # If less points were scored than predicted
             under += 1
             new_col.append(-1)
