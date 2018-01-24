@@ -228,6 +228,22 @@ def add_OU_HIT_col(game_df, home_points_col, away_points_col, col_name):
     perfect = 0
     skipped = 0
     new_col = []
+    """
+    tmp_df = game_df.dropna(['predicted_over_under', home_points_col, away_points_col])
+    tmp_df['avg_pts'] = tmp_df[home_points_col]+tmp_df[away_points_col]
+    tmp_df['game_pts'] = tmp_df[HOME_TEAM_PTS] + tmp_df[AWAY_TEAM_PTS]
+    hit = (len(tmp_df[(tmp_df['avg_pts'] > abs(tmp_df['predicted_over_under']) &
+                      tmp_df['game_pts'] > abs(tmp_df['predicted_over_under']))]) +
+           len(tmp_df[(tmp_df['avg_pts'] < abs(tmp_df['predicted_over_under']) &
+                      tmp_df['game_pts'] < abs(tmp_df['predicted_over_under']))]) +))
+
+    missed = (len(tmp_df[(tmp_df['avg_pts'] > abs(tmp_df['predicted_over_under']) &
+                          tmp_df['game_pts'] < abs(tmp_df['predicted_over_under']))]) +
+              len(tmp_df[(tmp_df['avg_pts'] < abs(tmp_df['predicted_over_under']) &
+                       tmp_df['game_pts'] > abs(tmp_df['predicted_over_under']))]) +))
+    perfect = (len(tmp_df['game_points']==abs(tmp_df['predicted_over_under'])))
+    missed = len(tmp_df) - hit - missed - perfect
+    """
     for ind, row in game_df.iterrows():
         if pd.isnull(row['predicted_over_under']):
             skipped += 1
@@ -442,3 +458,47 @@ def print_threshold_counts(home_col, away_col, threshold, game_df, col_name):
 
     return (oo_pct, oo_count, uu_pct, uu_count)
     
+def get_bball_epoch_dt(row):
+    game_date_str = str(int(row['GameTime']))
+    return Tutils.tme2epoch(game_date_str, "%Y%m%d")
+    
+def get_prior_score(row, base_df, lookback_games):
+    """
+      Used to create ML models, requires 'team' and 'gameTime' (seconds)
+         NOTE : COULD BE MERGED WITH 'GET_PRIOR_SCORE_GAME_DF'
+    """
+    # Get prior games for this team
+    team_df = base_df[((base_df["Team"] == row["Team"]) &
+                       (base_df["GameTime"] < row["GameTime"]))].sort_values("GameTime").reset_index()
+    if len(team_df) == 0:
+        return np.nan
+    elif len(team_df) < lookback_games:
+        return np.nan
+    else:
+        # Return the most recent value
+        last_ind = len(team_df) - lookback_games
+        return team_df.loc[last_ind]["PointsScored"]
+
+def get_prior_score_game_df(row, base_df, team_col, lookback_games):
+    """
+      Used to create ML models, used for the 'game_df' created from the OP_basketball_games_dir
+         NOTE : COULD BE MERGED WITH 'GET_PRIOR_SCORE'
+    """
+    # Get prior games for this team
+    team_df = base_df[((base_df['HomeTeam'] == row[team_col]) |
+                       (base_df['AwayTeam'] == row[team_col]))]
+    if len(team_df) == 0:
+        return np.nan
+    
+    # Get only the previous games
+    sorted_team_df = team_df[(team_df["EpochDt"] < row["EpochDt"])].sort_values("EpochDt").reset_index()
+    if len(sorted_team_df) < lookback_games:
+        return np.nan
+    
+    last_ind = len(sorted_team_df) - lookback_games
+    last_game_row = sorted_team_df.loc[last_ind]
+    
+    if last_game_row['HomeTeam'] == row[team_col]:
+        return last_game_row['HomePoints']
+    else:
+        return last_game_row['AwayPoints']    
