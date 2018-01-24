@@ -12,7 +12,8 @@ import NBA_utils
 import Tutils
 import numpy as np
 from bokeh.plotting import figure, show, output_file
-import analyze_ML_model
+import pickle
+import analyze_strategy
 
 TOOLS = 'pan,box_zoom,reset,box_select,undo,redo,crosshair,hover'
 
@@ -39,16 +40,23 @@ def look_at_daily_bets(game_df, odds_df, date, options):
 
     stat_map = {}
     # Add whatever columns we want to look at
-    for d in range(3,6):
-        for r in range(3, 20):
-            pct_counts = add_col_and_print_threshold_counts(game_df, d, r, team_df_map)
-            key = "%d %d" % (d, r)
-            stat_map[key] = pct_counts
+    #d = 3
+    #r = 8
+    d=3
+    for r in range(1, 15):    
+        pct_counts = add_col_and_print_threshold_counts(game_df, d, r, team_df_map)
+        key = "%d %d" % (d, r)
+        stat_map[key] = pct_counts
             
     #
     if options.plot_file:
-        plot_over_under_pcts(stat_map, options.plot_file)    
+        plot_over_under_pcts(stat_map, options.plot_file)
+        plot_col_running_sum(game_df, "OU_HIT_3_avg_8", options.plot_file)
+        #plot_col_running_sum(game_df, "OU_HIT_3_avg_9", options.plot_file)
+        #plot_col_running_sum(game_df, "OU_HIT_3_avg_6", options.plot_file)
+        #plot_col_running_sum(game_df, "OU_HIT_3_avg_7", options.plot_file)        
 
+        
     #
     # Add the running 3game average to look at
     #
@@ -65,27 +73,11 @@ def look_at_daily_bets(game_df, odds_df, date, options):
                                                                            row,
                                                                            team_df_map[row['AwayTeam']]),
                                       axis=1)
-    """
-    home_col = "HomeTeamHomeAvg%sGames" % num_games
-    game_df[home_col] = game_df.apply(lambda row: calculate_team_home_avg_xdays(row['HomeTeam'],
-                                                                                num_games,
-                                                                                row,
-                                                                                team_df_map[row['HomeTeam']]),
-                                      axis=1)
-    away_col = "AwayTeamAwayAvg%sGames" % num_games
-    game_df[away_col] = game_df.apply(lambda row: calculate_team_away_avg_xdays(row['AwayTeam'],
-                                                                                num_games,
-                                                                                row,
-                                                                                team_df_map[row['AwayTeam']]),
-                                      axis=1)
-    """
+
     #
-    # Add the model predicted scores
+    #  Add the prior game scores
     #
-    #model_df = analyze_cubist_model.create_base_df(sorted_game_df)
-    #model_df = analyze_cubist_model.augment_df(model_df)
-    #model = analyze_cubist_model.create_model(model_df)
-    #model_df.to_csv("model_df.csv")
+    
     
     #
     # Get the vegas lines for this date and iterate over them
@@ -122,37 +114,39 @@ def look_at_daily_bets(game_df, odds_df, date, options):
             print ("Can't make map for team: %s" % row['Home_Team'])
             continue        
         if home_team_df.iloc[-1]['RemappedAwayTeam'] == row['Home_Team']:
-            home_team_avg = home_team_df.iloc[-1]['AwayTeamAvg3Games']            
+            home_team_avg = home_team_df.iloc[-1]['AwayTeamAvg3Games']
         else:
             home_team_avg = home_team_df.iloc[-1]['HomeTeamAvg3Games']
             
         print ("%s %s : %f" % (row['Home_Team'], 'TeamAvg3Games', home_team_avg))
         print ("%f" % (home_team_avg+away_team_avg))
-        if (home_team_avg+away_team_avg) - abs(row['Over_under_Open']) >= 8:
+        #
+        # If the teams have been averaging more than 7 over the O/U, it's usually over
+        #
+        if (home_team_avg+away_team_avg) - abs(row['Over_under_Open']) >= 7:
             print ("YOOO BET ON THE OVER HERE: BEEN AVERAGING %d!!!" % (home_team_avg+away_team_avg))
-        if (abs(row['Over_under_Open']) - (home_team_avg+away_team_avg)) >= 8:
-            print ("YOOO BET ON THE UNDER HERE: BEEN AVERAGING %d!!!" % (home_team_avg+away_team_avg))
-        # ----------------------------------------------------------------------------------------------
-        # ----------------------------------------------------------------------------------------------
-        # ----------------------------------------------------------------------------------------------
-        """
-        away_team_df = game_df[(game_df['RemappedAwayTeam']==row['Away_Team'])]
-        away_team_avg = away_team_df.iloc[-1]['AwayTeamAwayAvg3Games']
-        print ("%s %s : %f" % (row['Away_Team'], 'TeamAwayAvg3Games', away_team_avg))
-        
-        home_team_df = game_df[(game_df['RemappedHomeTeam']==row['Home_Team'])]
-        if (len(home_team_df)==0):
-            print ("Can't make map for team: %s" % row['Home_Team'])
-            continue        
-        home_team_avg = home_team_df.iloc[-1]['HomeTeamHomeAvg3Games']            
-            
-        print ("%s %s : %f" % (row['Home_Team'], 'TeamHomeAvg3Games', home_team_avg))
-        print ("%f" % (home_team_avg+away_team_avg))
-        if (home_team_avg+away_team_avg) > abs(row['Over_under_Open']):
-            print ("YOOO BET ON THE OVER HERE: BEEN AVERAGING %d!!!" % (home_team_avg+away_team_avg))
-        """
         
         
+
+def plot_col_running_sum(game_df, col, plot_file):
+    """
+    """
+    game_df.to_csv("game_df.csv")
+    p1 = figure(plot_width=1000, tools=TOOLS)
+    #this_df = game_df.dropna([col])
+    all_dates = game_df['GameTime'].unique().tolist()
+    y_data = []
+    x_data = []
+    itr = 0
+    running_sum = 0
+    for d in sorted(all_dates):
+        x_data.append(itr)
+        running_sum = running_sum + game_df[(game_df['GameTime']==d)][col].sum()
+        y_data.append(running_sum)
+        itr+=1
+    p1.line(x_data, y_data, legend=col)        
+    show(p1)
+    
 def plot_over_under_pcts(stat_map, plot_file):
     """
     Stat_map : dictionary
@@ -188,29 +182,7 @@ def plot_over_under_pcts(stat_map, plot_file):
     show(p1)
         
 def add_col_and_print_threshold_counts(game_df, num_games, thshld, team_df_map):
-    #
-    # Home/Away spearate
-    #
-    home_col = "HomeTeamHomeAvgPast%sGames" % num_games
-    away_col = "AwayTeamAwayAvgPast%sGames" % num_games    
-    game_df[home_col] = game_df.apply(lambda row: calculate_team_home_avg_past_xdays(row['HomeTeam'],
-                                                                                     num_games,
-                                                                                     row,
-                                                                                     team_df_map[row['HomeTeam']]),
-                                      axis=1)
-    game_df[away_col] = game_df.apply(lambda row: calculate_team_away_avg_past_xdays(row['AwayTeam'],
-                                                                                     num_games,
-                                                                                     row,
-                                                                                     team_df_map[row['AwayTeam']]),
-                                      axis=1)
-    #
-    # Look at the counts for number of times home_col + away_col AND game_df either greater than or less than predicted
-    #
-    this_info = NBA_utils.add_OU_HIT_col(game_df, home_col, away_col, ("OU_HIT_HA_%s_avg" % num_games))
-    print (home_col, away_col)
-    print ("NUM GAMES AVG OVER/UNDERS: %d" % num_games)    
-    NBA_utils.print_over_under(this_info[0], this_info[1], this_info[2], this_info[3])
-
+    #########
     #
     # Considering all games
     #
@@ -230,12 +202,10 @@ def add_col_and_print_threshold_counts(game_df, num_games, thshld, team_df_map):
     print (home_col, away_col)    
     print ("NUM GAMES AVG OVER/UNDERS: %d" % num_games)    
     NBA_utils.print_over_under(this_info[0], this_info[1], this_info[2], this_info[3])
-
+    ###########
+    ###########    
     #
     # Look at the counts for the home/away games
-    #
-    #home_col = "HomeTeamHomeAvgPast%sGames" % num_games
-    #away_col = "AwayTeamAwayAvgPast%sGames" % num_games        
     #
     # Check O/U when teams are averaging more than thshld points over the spread
     #
@@ -273,20 +243,55 @@ def add_col_and_print_threshold_counts(game_df, num_games, thshld, team_df_map):
         uu_pct = this_info[1]/this_info[0]
         uu_count = this_info[1]+this_info[0]
 
+    ###########
+    #
+    # Home/Away spearate
+    #  Note -- Doesn't look so good so ignoring
+    #
+    #home_col = "HomeTeamHomeAvgPast%sGames" % num_games
+    #away_col = "AwayTeamAwayAvgPast%sGames" % num_games    
+    #game_df[home_col] = game_df.apply(lambda row: calculate_team_home_avg_past_xdays(row['HomeTeam'],
+    #                                                                                 num_games,
+    #                                                                                 row,
+    #                                                                                 team_df_map[row['HomeTeam']]),
+    #                                  axis=1)
+    #game_df[away_col] = game_df.apply(lambda row: calculate_team_away_avg_past_xdays(row['AwayTeam'],
+    #                                                                                 num_games,
+    #                                                                                 row,
+    #                                                                                 team_df_map[row['AwayTeam']]),
+    #                                  axis=1)
+    #
+    #this_info = NBA_utils.add_OU_HIT_col(game_df, home_col, away_col, ("OU_HIT_HA_%s_avg" % num_games))
+    #print (home_col, away_col)
+    #print ("NUM GAMES AVG OVER/UNDERS: %d" % num_games)    
+    #NBA_utils.print_over_under(this_info[0], this_info[1], this_info[2], this_info[3])
+    #########
+    
+    ###########
+    # Look at allowed points
+    #  Note -- Doesn't look so good so ignoring
+    ###########    
+    #home_col = "HomeTeamAllowedAvgPast%sGames" % num_games
+    #away_col = "AwayTeamAllowedAvgPast%sGames" % num_games    
+    #game_df[home_col] = game_df.apply(lambda row: calculate_team_allowed_avg_past_xdays(row['HomeTeam'],
+    #                                                                                    num_games,
+    #                                                                                    row,
+    #                                                                                    team_df_map[row['HomeTeam']]),
+    #                                  axis=1)
+    #game_df[away_col] = game_df.apply(lambda row: calculate_team_allowed_avg_past_xdays(row['AwayTeam'],
+    #                                                                                    num_games,
+    #                                                                                    row,
+    #                                                                                    team_df_map[row['AwayTeam']]),
+    #                                  axis=1)
+    #this_info = NBA_utils.add_OU_HIT_col(game_df, home_col, away_col, ("OU_HIT_%s_avg" % num_games))
+    #print (home_col, away_col)    
+    #print ("NUM GAMES ALLOWED AVG OVER/UNDERS: %d" % num_games)    
+    #NBA_utils.print_over_under(this_info[0], this_info[1], this_info[2], this_info[3])
+    ###########
+        
     return (oo_pct, oo_count, uu_pct, uu_count)
         
         
-def get_team_xday_avg_vs_OU(team_name, team_df, num_games):
-    sorted_team_df = team_df.sort_values(['EpochDt'])
-    avg_col_name = "last_%s_game_avg" % num_games
-    sorted_team_df[avg_col_name] = sorted_team_df.apply(lambda row : calculate_team_avg_past_xdays(team_name,
-                                                                                                   num_games,
-                                                                                                   row,
-                                                                                                   sorted_team_df),
-                                                        axis=1)    
-    
-    return 0.0
-
 def calculate_team_avg_past_xdays(team_name, num_games, row, team_df):
     """
     """
@@ -301,6 +306,22 @@ def calculate_team_avg_past_xdays(team_name, num_games, row, team_df):
             team_points.append(rw['AwayPoints'])
         elif rw['HomeTeam'] == team_name:
             team_points.append(rw['HomePoints'])
+    return (sum(team_points)/len(team_points))
+
+def calculate_team_allowed_avg_past_xdays(team_name, num_games, row, team_df):
+    """
+    """
+    # Get the last x games
+    last_x_games = team_df[team_df['EpochDt'] < row['EpochDt']][-num_games:]
+    # If there aren't at least x games, return missing
+    if len(last_x_games) < num_games:
+        return np.nan
+    team_points = []
+    for i, rw in last_x_games.iterrows():
+        if rw['AwayTeam'] == team_name:
+            team_points.append(rw['HomePoints'])
+        elif rw['HomeTeam'] == team_name:
+            team_points.append(rw['AwayPoints'])
     return (sum(team_points)/len(team_points))
 
 def calculate_team_home_avg_past_xdays(team_name, num_games, row, team_df):
@@ -414,11 +435,12 @@ def process(game_dir, odds_dir, odds_base, date, league, options):
     odds_df = NBA_utils.read_odds_dir(odds_dir, odds_base)
     NBA_utils.add_odds_game_date(odds_df)
     odds_df.to_csv("odds_df.csv")
+    
     #
     # Add the predicted_scores and predicted_over_under spreads to the game df
     #
     NBA_utils.add_odds(game_df, odds_df, league)
-    
+
     # Add the 'Over_under_HIT' column to the dataframe
     # -1 = Less points scored than expected
     # 1 = More points scored than expected
