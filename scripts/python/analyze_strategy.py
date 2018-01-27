@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 from bokeh.plotting import figure, show, output_file
 import analyze_ML_model
+import MODEL_utils
 import pickle
 
 TOOLS = 'pan,box_zoom,wheel_zoom,reset,box_select,undo,redo,crosshair,hover'
@@ -25,6 +26,8 @@ AWAY_TEAM_PTS = 'AwayPoints'
 
 #PREDICTORS = ['Prior_1_game_score', 'Prior_3game_avg', 'HomeAway']
 
+model_file = r"C:\Users\Tom\programming\static\model\basic_RF_V5.sav"
+    
 def look_at_strategies(game_df, date, options):
     """
     """
@@ -38,7 +41,7 @@ def look_at_strategies(game_df, date, options):
     #
     # Look at the cubist model compared to over under
     #
-    game_df = add_modeled_points(game_df)
+    game_df = add_modeled_points(game_df, team_df_map)
     stat_map = {}    
     for r in range(1, 15):
         pct_counts = NBA_utils.print_threshold_counts("Modeled_home_points", "Modeled_away_points", r, game_df, "modeled")
@@ -47,8 +50,7 @@ def look_at_strategies(game_df, date, options):
     if options.plot_file:
         plot_over_under_pcts(stat_map, options.plot_file)
         
-    game_df.to_csv("game_df.csv")
-        
+    sys.exit()
     stat_map = {}
     # Add whatever columns we want to look at
     for d in range(2,4):
@@ -65,47 +67,69 @@ def look_at_strategies(game_df, date, options):
         #plot_col_running_sum(game_df, "OU_HIT_3_avg_6", options.plot_file)
         #plot_col_running_sum(game_df, "OU_HIT_3_avg_7", options.plot_file)        
 
-def read_predictors_from_info(info_lines):
-    preds = []
-    for line in info_lines:
-        if line.startswith("Predictors:"):
-            poss_preds = line.split(":")[1]
-            preds = poss_preds.replace(" ","").rstrip("\r\n").split(",")
-    return preds
-
-def read_end_date_from_info(info_lines):
-    for line in info_lines:
-        if line.startswith("Model dataset ended on:"):
-            end_date = line.replace(" ", "").rstrip("\r\n").split(":")[1]
-            return Tutils.tme2epoch(end_date, "%Y%m%d")
-    print ("Error parsing the model end date")
-    sys.exit()
         
-def add_modeled_points(game_df):
+def add_modeled_points(game_df, team_df_map):
     """
     """
     # Load in the model
-    model_file = r"C:\Users\Tom\programming\static\model\basic_RF_P3.sav"
     model = pickle.load(open(model_file, "rb"))
     # Load in the info file
     info_file = model_file.replace(".sav", ".info")
     info_F = open(info_file, "r")
     info_lines = info_F.readlines()
     # Get the predictors
-    predictors = read_predictors_from_info(info_lines)
-    training_end_date = read_end_date_from_info(info_lines)
-
+    predictors = MODEL_utils.read_predictors_from_info(info_lines)
+    training_end_date = MODEL_utils.read_end_date_from_info(info_lines)
+    ## Test
+    #training_end_date = Tutils.tme2epoch("20180120", "%Y%m%d")
+    
     # First, need to add columns for each predictor
     for p in predictors:
-        if (p.find("Prior_") != -1) and (p.find("_game_score")!=-1):
+        if (p.startswith("Prior_")) and (p.find("_game_score")!=-1):
             # add a column for the prior game score
             prior_day = int(p.split("_")[1])
             home_team_pred = 'HomeTeam_' + p
             away_team_pred = 'AwayTeam_' + p            
-            game_df[home_team_pred] = game_df.apply(lambda row: NBA_utils.get_prior_score_game_df(row, game_df, 'HomeTeam', prior_day),
+            game_df[home_team_pred] = game_df.apply(lambda row: NBA_utils.get_prior_score_game_df(row, game_df, 'HomeTeam', 'HomeTeam', 'AwayTeam',
+                                                                                                  'EpochDt', prior_day),
                                                     axis=1)
-            game_df[away_team_pred] = game_df.apply(lambda row: NBA_utils.get_prior_score_game_df(row, game_df, 'AwayTeam', prior_day),
+            game_df[away_team_pred] = game_df.apply(lambda row: NBA_utils.get_prior_score_game_df(row, game_df, 'AwayTeam', 'HomeTeam', 'AwayTeam',
+                                                                                                  'EpochDt', prior_day),
                                                     axis=1)
+        elif (p.startswith("Prior_")) and (p.find("_game_avg")!=-1):
+            # add a column for the prior game avg
+            prior_day = int(p.split("_")[1])
+            home_team_pred = 'HomeTeam_' + p
+            away_team_pred = 'AwayTeam_' + p            
+            game_df[home_team_pred] = game_df.apply(lambda row: NBA_utils.calculate_team_avg_past_xdays_game_df(row['HomeTeam'], prior_day, row,
+                                                                                                                team_df_map[row['HomeTeam']]),
+                                                    axis=1)
+            game_df[away_team_pred] = game_df.apply(lambda row: NBA_utils.calculate_team_avg_past_xdays_game_df(row['AwayTeam'], prior_day, row,
+                                                                                                                team_df_map[row['AwayTeam']]),
+                                                    axis=1)
+        elif (p.startswith("Opp_allowed_Prior")) and (p.find("_game_avg")!=-1):
+              # Add column for opponent allowed points
+              prior_day = int(p.split("_")[3])
+              home_team_pred = 'HomeTeam_' + p
+              away_team_pred = 'AwayTeam_' + p
+              game_df[home_team_pred] = game_df.apply(lambda row: NBA_utils.calculate_team_allowed_avg_past_xdays_game_df(row['AwayTeam'], prior_day,
+                                                                                                                          row, team_df_map[row['AwayTeam']]),
+                                                      axis=1)
+              game_df[away_team_pred] = game_df.apply(lambda row: NBA_utils.calculate_team_allowed_avg_past_xdays_game_df(row['HomeTeam'], prior_day,
+                                                                                                                          row, team_df_map[row['HomeTeam']]),
+                                                      axis=1)
+        elif (p.find("rest")!=-1):
+              # Add column for rest
+              home_team_pred = 'HomeTeam_' + p
+              away_team_pred = 'AwayTeam_' + p
+              game_df[home_team_pred] = game_df.apply(lambda row: NBA_utils.calculate_team_rest_game_df(row['HomeTeam'], row, team_df_map[row['HomeTeam']]),
+                                                      axis=1)
+              game_df[away_team_pred] = game_df.apply(lambda row: NBA_utils.calculate_team_rest_game_df(row['AwayTeam'], row, team_df_map[row['AwayTeam']]),
+                                                      axis=1)             
+        else:
+              print ("Error: Not sure how to calculate: %s" % p)
+              sys.exit()
+            
 
     # Now we have to run the model to produce the modeled_home_points and modeled_away_points
     game_df['Modeled_home_points'] = game_df.apply(lambda row: get_model_prediction(model, row, predictors, 'HomeTeam', training_end_date),
@@ -188,11 +212,6 @@ def plot_over_under_pcts(stat_map, plot_file):
     show(p1)
 
     
-def print_threshold_counts(game_df, thshld, home_points_col, away_points_col):
-    """
-    """
-    this_info = NBA_utils.add_over_under_col_threshold(game_df, home_col, away_col,
-                                                       "OU_HIT_modeled_%s" % thshld)
     
     
 def add_col_and_print_threshold_counts(game_df, num_games, thshld, team_df_map):
@@ -202,15 +221,15 @@ def add_col_and_print_threshold_counts(game_df, num_games, thshld, team_df_map):
     #
     home_col = "HomeTeamAvgPast%sGames" % num_games
     away_col = "AwayTeamAvgPast%sGames" % num_games    
-    game_df[home_col] = game_df.apply(lambda row: calculate_team_avg_past_xdays(row['HomeTeam'],
-                                                                                num_games,
-                                                                                row,
-                                                                                team_df_map[row['HomeTeam']]),
+    game_df[home_col] = game_df.apply(lambda row: NBA_utils.calculate_team_avg_past_xdays_game_df(row['HomeTeam'],
+                                                                                                  num_games,
+                                                                                                  row,
+                                                                                                  team_df_map[row['HomeTeam']]),
                                       axis=1)
-    game_df[away_col] = game_df.apply(lambda row: calculate_team_avg_past_xdays(row['AwayTeam'],
-                                                                                num_games,
-                                                                                row,
-                                                                                team_df_map[row['AwayTeam']]),
+    game_df[away_col] = game_df.apply(lambda row: NBA_utils.calculate_team_avg_past_xdays_game_df(row['AwayTeam'],
+                                                                                                  num_games,
+                                                                                                  row,
+                                                                                                  team_df_map[row['AwayTeam']]),
                                       axis=1)
     this_info = NBA_utils.add_OU_HIT_col(game_df, home_col, away_col, ("OU_HIT_%s_avg" % num_games))
     print (home_col, away_col)    
@@ -233,10 +252,12 @@ def add_col_and_print_threshold_counts(game_df, num_games, thshld, team_df_map):
         oo_pct = np.nan
         oo_count = np.nan
     elif this_info[1] == 0:
-        oo_pct = 5
+        #oo_pct = 5
+        oo_pct = 1        
         oo_count = this_info[0]+this_info[1]        
     else:
-        oo_pct = this_info[0]/this_info[1]
+        #oo_pct = this_info[0]/this_info[1]
+        oo_pct = this_info[0]/(this_info[0] + this_info[1])
         oo_count = this_info[0]+this_info[1]
     #
     # Check O/U when teams are averaging thshld points less than the spread
@@ -251,10 +272,12 @@ def add_col_and_print_threshold_counts(game_df, num_games, thshld, team_df_map):
         uu_pct = np.nan
         uu_count = np.nan
     elif this_info[0] == 0:
-        uu_pct = 5
+        #uu_pct = 5
+        uu_pct = 1
         uu_count = this_info[0]+this_info[1]        
     else:
-        uu_pct = this_info[1]/this_info[0]
+        #uu_pct = this_info[1]/this_info[0]
+        uu_pct = this_info[1]/(this_info[0]+this_info[1])
         uu_count = this_info[1]+this_info[0]
 
     ###########
@@ -306,37 +329,6 @@ def add_col_and_print_threshold_counts(game_df, num_games, thshld, team_df_map):
     return (oo_pct, oo_count, uu_pct, uu_count)
         
         
-def calculate_team_avg_past_xdays(team_name, num_games, row, team_df):
-    """
-    """
-    # Get the last x games
-    last_x_games = team_df[team_df['EpochDt'] < row['EpochDt']][-num_games:]
-    # If there aren't at least x games, return missing
-    if len(last_x_games) < num_games:
-        return np.nan
-    team_points = []
-    for i, rw in last_x_games.iterrows():
-        if rw['AwayTeam'] == team_name:
-            team_points.append(rw['AwayPoints'])
-        elif rw['HomeTeam'] == team_name:
-            team_points.append(rw['HomePoints'])
-    return (sum(team_points)/len(team_points))
-
-def calculate_team_allowed_avg_past_xdays(team_name, num_games, row, team_df):
-    """
-    """
-    # Get the last x games
-    last_x_games = team_df[team_df['EpochDt'] < row['EpochDt']][-num_games:]
-    # If there aren't at least x games, return missing
-    if len(last_x_games) < num_games:
-        return np.nan
-    team_points = []
-    for i, rw in last_x_games.iterrows():
-        if rw['AwayTeam'] == team_name:
-            team_points.append(rw['HomePoints'])
-        elif rw['HomeTeam'] == team_name:
-            team_points.append(rw['AwayPoints'])
-    return (sum(team_points)/len(team_points))
 
 def calculate_team_home_avg_past_xdays(team_name, num_games, row, team_df):
     """

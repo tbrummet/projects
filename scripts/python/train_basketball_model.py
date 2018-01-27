@@ -21,8 +21,18 @@ from sklearn.naive_bayes import GaussianNB,BernoulliNB
 from sklearn import cross_validation
 import pickle
 
-
-PREDICTORS = ['Prior_1_game_score', 'Prior_2_game_score', 'Prior_3_game_score']
+# V1
+#PREDICTORS = ['Prior_1_game_score', 'Prior_2_game_score', 'Prior_3_game_score',
+#              'Prior_5_game_avg', 'Opp_allowed_Prior_5_game_avg', 'rest']
+#V2
+#PREDICTORS = ['Prior_3_game_avg', 'Prior_5_game_avg', 'Opp_allowed_Prior_5_game_avg', 'rest']
+#V3
+PREDICTORS = ['Prior_3_game_avg', 'Prior_5_game_avg', 'Opp_allowed_Prior_3_game_avg', 'Opp_allowed_Prior_5_game_avg', 'rest']
+#V4
+#PREDICTORS = ['Prior_3_game_avg', 'Prior_5_game_avg', 'Prior_7_game_avg', 'Opp_allowed_Prior_3_game_avg', 'Opp_allowed_Prior_5_game_avg',
+#              'Opp_allowed_Prior_7_game_avg', 'rest']
+#V5
+PREDICTORS = ['Prior_1_game_score', 'Prior_3_game_avg', 'Prior_5_game_avg', 'Opp_allowed_Prior_3_game_avg', 'Opp_allowed_Prior_5_game_avg', 'rest']
 
 def create_base_df(sorted_game_df):
     # Iterate through the dataframe and make the data that I need
@@ -31,7 +41,9 @@ def create_base_df(sorted_game_df):
     game_time_list = []
     game_time_str_list = []
     teams_list = []
+    opp_teams_list = []
     points_list = []
+    opp_points_list = []    
     home_away_list = []  # 1 = home, 0 = away
     for ind, row in sorted_game_df.iterrows():
         # For each row, need to make 2 rows, one for home and 1 for away team
@@ -43,6 +55,10 @@ def create_base_df(sorted_game_df):
         teams_list.append(row["HomeTeam"])
         points_list.append(row["AwayPoints"])
         points_list.append(row["HomePoints"])
+        opp_teams_list.append(row["HomeTeam"])
+        opp_teams_list.append(row["AwayTeam"])        
+        opp_points_list.append(row["HomePoints"])
+        opp_points_list.append(row["AwayPoints"])
         home_away_list.append(0)
         home_away_list.append(1)
 
@@ -51,6 +67,8 @@ def create_base_df(sorted_game_df):
     master_df["GameTimeStr"] = game_time_str_list
     master_df["Team"] = teams_list
     master_df["PointsScored"] = points_list
+    master_df["OppTeam"] = opp_teams_list
+    master_df["OppPointsScored"] = opp_points_list
     master_df["HomeAway"] = home_away_list
     return master_df
 
@@ -72,7 +90,20 @@ def augment_df(base_df):
     #   Prior 3 games and rest inbetween each one
     base_df["Prior_1_game_score"] = base_df.apply(lambda row: NBA_utils.get_prior_score(row, base_df, 1), axis=1)
     base_df["Prior_2_game_score"] = base_df.apply(lambda row: NBA_utils.get_prior_score(row, base_df, 2), axis=1)
-    base_df["Prior_3_game_score"] = base_df.apply(lambda row: NBA_utils.get_prior_score(row, base_df, 3), axis=1)    
+    base_df["Prior_3_game_score"] = base_df.apply(lambda row: NBA_utils.get_prior_score(row, base_df, 3), axis=1)
+    base_df["Prior_3_game_avg"] = base_df.apply(lambda row: NBA_utils.calculate_team_avg_past_xdays_base_df(row, base_df, 3),
+                                                axis=1)    
+    base_df["Prior_5_game_avg"] = base_df.apply(lambda row: NBA_utils.calculate_team_avg_past_xdays_base_df(row, base_df, 5),
+                                                axis=1)
+    base_df["Prior_7_game_avg"] = base_df.apply(lambda row: NBA_utils.calculate_team_avg_past_xdays_base_df(row, base_df, 7),
+                                                axis=1)    
+    base_df["Opp_allowed_Prior_3_game_avg"] = base_df.apply(lambda row: NBA_utils.calculate_opp_team_allowed_avg_past_xdays_base_df(row, base_df, 3),
+                                                            axis=1)        
+    base_df["Opp_allowed_Prior_5_game_avg"] = base_df.apply(lambda row: NBA_utils.calculate_opp_team_allowed_avg_past_xdays_base_df(row, base_df, 5),
+                                                            axis=1)
+    base_df["Opp_allowed_Prior_7_game_avg"] = base_df.apply(lambda row: NBA_utils.calculate_opp_team_allowed_avg_past_xdays_base_df(row, base_df, 7),
+                                                            axis=1)        
+    base_df["rest"] = base_df.apply(lambda row: NBA_utils.calculate_team_rest_base_df(row, base_df), axis=1)
 
     return base_df
 
@@ -106,7 +137,7 @@ def create_ML_model(base_df, target, training_start, training_end, output_base):
     print ("Length of testing dataset: %d" % len(test_target_array))    
     
     # Fit the model
-    model = RandomForestRegressor()
+    model = RandomForestRegressor(random_state=1)
     model.fit(train_predictor_array, train_target_array)
 
     # Score the model over the testing dataset
@@ -141,7 +172,7 @@ def create_ML_model(base_df, target, training_start, training_end, output_base):
 
     return model    
         
-def process(bball_games_dir, odds_dir, league, output_base):
+def process(bball_games_dir, league, output_base):
     # Read all of the basketball games
     game_df = NBA_utils.read_OP_bball_dir(bball_games_dir)
     game_df['EpochDt'] = game_df.apply(lambda row: NBA_utils.get_bball_epoch_dt(row), axis=1)
@@ -153,30 +184,30 @@ def process(bball_games_dir, odds_dir, league, output_base):
 
     # Add predictors we need, like the prior game score
     base_df = augment_df(base_df)
+
     
     # Create the ML model
     model_start_epoch = Tutils.tme2epoch("20171001", "%Y%m%d")
-    model_end_epoch = Tutils.tme2epoch("20180101", "%Y%m%d")
+    model_end_epoch = Tutils.tme2epoch("20180110", "%Y%m%d")
     model = create_ML_model(base_df, 'PointsScored', model_start_epoch, model_end_epoch, output_base)
     
     
 def main():
-    usage_str = "%prog basketball_game_dir odds_dir league output_base"
+    usage_str = "%prog basketball_game_dir league output_base"
     parser = OptionParser(usage = usage_str)
         
     (options, args) = parser.parse_args()
     
-    if len(args) < 2:
+    if len(args) < 3:
         parser.print_help()
         sys.exit(2)
 
                                   
     bball_games_dir = args[0]
-    odds_dir = args[1]
-    league = args[2]
-    output_base = args[3]
+    league = args[1]
+    output_base = args[2]
 
-    process(bball_games_dir, odds_dir, league, output_base)
+    process(bball_games_dir, league, output_base)
 
 
 if __name__ == "__main__":

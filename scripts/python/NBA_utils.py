@@ -390,19 +390,6 @@ def make_team_df_map(game_df):
                                    (game_df[AWAY_TEAM]==tm))].sort_values('EpochDt').reset_index(drop=True)
     return team_df_map
 
-def get_prior_score(row, base_df, lookback_games):
-    # Get prior games for this team
-    team_df = base_df[((base_df["Team"] == row["Team"]) &
-                       (base_df["GameTime"] < row["GameTime"]))].sort_values("GameTime").reset_index()
-    if len(team_df) == 0:
-        return np.nan
-    elif len(team_df) < lookback_games:
-        return np.nan
-    else:
-        # Return the most recent value
-        last_ind = len(team_df) - lookback_games
-        return team_df.loc[last_ind]["PointsScored"]
-
 def get_prior_game_avg(row, base_df, lookback_games):
     # Get prior games for this team
     team_df = base_df[((base_df["Team"] == row["Team"]) &
@@ -433,10 +420,12 @@ def print_threshold_counts(home_col, away_col, threshold, game_df, col_name):
         oo_pct = np.nan
         oo_count = np.nan
     elif this_info[1] == 0:
-        oo_pct = 5
+        #oo_pct = 5
+        oo_pct = 1        
         oo_count = this_info[0]+this_info[1]        
     else:
-        oo_pct = this_info[0]/this_info[1]
+        #oo_pct = this_info[0]/this_info[1]
+        oo_pct = this_info[0]/(this_info[0]+this_info[1])
         oo_count = this_info[0]+this_info[1]
     #
     # Check O/U when teams are averaging thshld points less than the spread
@@ -450,10 +439,12 @@ def print_threshold_counts(home_col, away_col, threshold, game_df, col_name):
         uu_pct = np.nan
         uu_count = np.nan
     elif this_info[0] == 0:
-        uu_pct = 5
+        #uu_pct = 5
+        uu_pct = 1
         uu_count = this_info[0]+this_info[1]        
     else:
-        uu_pct = this_info[1]/this_info[0]
+        #uu_pct = this_info[1]/this_info[0]
+        uu_pct = this_info[1]/(this_info[0]+this_info[1])
         uu_count = this_info[1]+this_info[0]
 
     return (oo_pct, oo_count, uu_pct, uu_count)
@@ -479,26 +470,155 @@ def get_prior_score(row, base_df, lookback_games):
         last_ind = len(team_df) - lookback_games
         return team_df.loc[last_ind]["PointsScored"]
 
-def get_prior_score_game_df(row, base_df, team_col, lookback_games):
+def get_prior_score_game_df(row, base_df, team_col, ht_col, at_col, tim_col, lookback_games):
     """
       Used to create ML models, used for the 'game_df' created from the OP_basketball_games_dir
          NOTE : COULD BE MERGED WITH 'GET_PRIOR_SCORE'
     """
+    if lookback_games==0:
+        if row[team_col] == row[ht_col]:
+            return row['HomePoints']
+        else:
+            return row['AwayPoints']
+        
     # Get prior games for this team
-    team_df = base_df[((base_df['HomeTeam'] == row[team_col]) |
-                       (base_df['AwayTeam'] == row[team_col]))]
+    team_df = base_df[((base_df[ht_col] == row[team_col]) |
+                       (base_df[at_col] == row[team_col]))]
     if len(team_df) == 0:
         return np.nan
     
     # Get only the previous games
-    sorted_team_df = team_df[(team_df["EpochDt"] < row["EpochDt"])].sort_values("EpochDt").reset_index()
+    sorted_team_df = team_df[(team_df["EpochDt"] < row[tim_col])].sort_values("EpochDt").reset_index()
     if len(sorted_team_df) < lookback_games:
         return np.nan
     
     last_ind = len(sorted_team_df) - lookback_games
     last_game_row = sorted_team_df.loc[last_ind]
     
-    if last_game_row['HomeTeam'] == row[team_col]:
+    if last_game_row[ht_col] == row[team_col]:
         return last_game_row['HomePoints']
     else:
         return last_game_row['AwayPoints']    
+
+def calculate_team_avg_past_xdays_game_df(team_name, num_games, row, team_df):
+    """
+    """
+    # Get the last x games
+    last_x_games = team_df[team_df['EpochDt'] < row['EpochDt']][-num_games:]
+    # If there aren't at least x games, return missing
+    if len(last_x_games) < num_games:
+        return np.nan
+    team_points = []
+    for i, rw in last_x_games.iterrows():
+        if rw['AwayTeam'] == team_name:
+            team_points.append(rw['AwayPoints'])
+        elif rw['HomeTeam'] == team_name:
+            team_points.append(rw['HomePoints'])
+    return (sum(team_points)/len(team_points))
+
+def calculate_team_avg_xdays_game_df(team_name, num_games, row, team_df):
+    """
+    """
+    # Get the last x games
+    last_x_games = team_df[team_df['EpochDt'] <= row['EpochDt']][-num_games:]
+    # If there aren't at least x games, return missing
+    if len(last_x_games) < num_games:
+        return np.nan
+    team_points = []
+    for i, rw in last_x_games.iterrows():
+        if rw['AwayTeam'] == team_name:
+            team_points.append(rw['AwayPoints'])
+        elif rw['HomeTeam'] == team_name:
+            team_points.append(rw['HomePoints'])
+    return (sum(team_points)/len(team_points))
+
+
+def calculate_team_avg_past_xdays_base_df(row, base_df, lookback_games):
+    """
+    """
+    # Get the last x games
+    team_df = base_df[((base_df["Team"] == row["Team"]) &
+                       (base_df["GameTime"] < row["GameTime"]))].sort_values("GameTime").reset_index()
+    # If there aren't at least x games, return missing
+    if len(team_df) < lookback_games:
+        return np.nan
+    return (team_df[-lookback_games:]["PointsScored"].mean())
+
+def calculate_opp_team_allowed_avg_past_xdays_base_df(row, base_df, lookback_games):
+    """
+    """
+    # Get the last x games
+    team_df = base_df[((base_df["Team"] == row["OppTeam"]) &
+                       (base_df["GameTime"] < row["GameTime"]))].sort_values("GameTime").reset_index()
+    # If there aren't at least x games, return missing
+    if len(team_df) < lookback_games:
+        return np.nan
+    return (team_df[-lookback_games:]["OppPointsScored"].mean())
+
+def calculate_team_rest_base_df(row, base_df):
+    """
+    """
+    # Get the last x games
+    team_df = base_df[((base_df["Team"] == row["Team"]) &
+                       (base_df["GameTime"] < row["GameTime"]))].sort_values("GameTime").reset_index()
+    if len(team_df) == 0:
+        return np.nan
+    game_time = row["GameTime"]
+    last_game_time = team_df.iloc[-1]["GameTime"]
+    rest = round((game_time - last_game_time) / 86400)
+    return rest
+
+def calculate_team_rest_game_df(team_name, row, team_df):
+    """
+    """
+    # Get the last x games
+    last_x_games = team_df[team_df['EpochDt'] < row['EpochDt']]
+    if len(last_x_games) == 0:
+        return np.nan
+    game_time = row['EpochDt']
+    last_game_time = last_x_games.iloc[-1]["EpochDt"]
+    rest = round((game_time - last_game_time) / 86400)
+    return rest
+
+def calculate_current_team_rest_game_df(team_name, row, team_df, this_epch):
+    """
+    """
+    # Get the last x games
+    last_x_games = team_df[team_df['EpochDt'] <= row['EpochDt']]
+    if len(last_x_games) == 0:
+        return np.nan
+    last_game_time = last_x_games.iloc[-1]["EpochDt"]
+    rest = round((this_epch - last_game_time) / 86400)
+    return rest
+
+def calculate_team_allowed_avg_past_xdays_game_df(team_name, num_games, row, team_df):
+    """
+    """
+    # Get the last x games
+    last_x_games = team_df[team_df['EpochDt'] < row['EpochDt']][-num_games:]
+    # If there aren't at least x games, return missing
+    if len(last_x_games) < num_games:
+        return np.nan
+    team_points = []
+    for i, rw in last_x_games.iterrows():
+        if rw['AwayTeam'] == team_name:
+            team_points.append(rw['HomePoints'])
+        elif rw['HomeTeam'] == team_name:
+            team_points.append(rw['AwayPoints'])
+    return (sum(team_points)/len(team_points))
+
+def calculate_team_allowed_avg_xdays_game_df(team_name, num_games, row, team_df):
+    """
+    """
+    # Get the last x games
+    last_x_games = team_df[team_df['EpochDt'] <= row['EpochDt']][-num_games:]
+    # If there aren't at least x games, return missing
+    if len(last_x_games) < num_games:
+        return np.nan
+    team_points = []
+    for i, rw in last_x_games.iterrows():
+        if rw['AwayTeam'] == team_name:
+            team_points.append(rw['HomePoints'])
+        elif rw['HomeTeam'] == team_name:
+            team_points.append(rw['AwayPoints'])
+    return (sum(team_points)/len(team_points))
