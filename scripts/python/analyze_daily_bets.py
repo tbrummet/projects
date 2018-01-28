@@ -150,36 +150,58 @@ def look_at_daily_bets(game_df, odds_df, date, options):
         for p in predictors:
             ht_pred_col = "%s_%s" % ('HomeTeam', p)
             at_pred_col = "%s_%s" % ('AwayTeam', p)
+
             if p.startswith("Opp"):
                 #
                 # Need differen't logic for getting opponents averages
                 #
-                if pd.isnull(away_team_df.iloc[-1][ht_pred_col]):
-                    ht_preds_list.append(np.nan)
-                else:
-                    if away_team_df.iloc[-1]['RemappedHomeTeam'] == row['Away_Team']:
+                # Get home Predictor
+                if away_team_df.iloc[-1]['RemappedHomeTeam'] == row['Away_Team']:
+                    if pd.isnull(away_team_df.iloc[-1][at_pred_col]):
+                        ht_preds_list.append(np.nan)
+                    else:
                         ht_preds_list.append(away_team_df.iloc[-1][at_pred_col])
+                else:
+                    if pd.isnull(away_team_df.iloc[-1][ht_pred_col]):
+                        ht_preds_list.append(np.nan)
                     else:
                         ht_preds_list.append(away_team_df.iloc[-1][ht_pred_col])
-                        
-                if pd.isnull(home_team_df.iloc[-1][ht_pred_col]):
-                    at_preds_list.append(np.nan)
-                else:
-                    if home_team_df.iloc[-1]['RemappedHomeTeam'] == row['Home_Team']:
+                # Get Away predictors
+                if home_team_df.iloc[-1]['RemappedHomeTeam'] == row['Home_Team']:
+                    if pd.isnull(home_team_df.iloc[-1][at_pred_col]):
+                        at_preds_list.append(np.nan)
+                    else:                
                         at_preds_list.append(home_team_df.iloc[-1][at_pred_col])
-                    else:                                            
-                        at_preds_list.append(away_team_df.iloc[-1][ht_pred_col])
+                else:
+                    if pd.isnull(home_team_df.iloc[-1][ht_pred_col]):
+                        at_preds_list.append(np.nan)
+                    else:
+                        at_preds_list.append(home_team_df.iloc[-1][ht_pred_col])      
                     
             else:
-                if pd.isnull(home_team_df.iloc[-1][ht_pred_col]):
-                    ht_preds_list.append(np.nan)
+                # Get home Predictor
+                if home_team_df.iloc[-1]['RemappedHomeTeam'] == row['Home_Team']:
+                    if pd.isnull(home_team_df.iloc[-1][ht_pred_col]):
+                        ht_preds_list.append(np.nan)
+                    else:
+                        ht_preds_list.append(home_team_df.iloc[-1][ht_pred_col])
                 else:
-                    ht_preds_list.append(home_team_df.iloc[-1][ht_pred_col])
-                if pd.isnull(away_team_df.iloc[-1][at_pred_col]):
-                    at_preds_list.append(np.nan)
+                    if pd.isnull(home_team_df.iloc[-1][at_pred_col]):
+                        ht_preds_list.append(np.nan)
+                    else:
+                        ht_preds_list.append(home_team_df.iloc[-1][at_pred_col])
+                # Get Away predictors
+                if away_team_df.iloc[-1]['RemappedHomeTeam'] == row['Away_Team']:
+                    if pd.isnull(away_team_df.iloc[-1][ht_pred_col]):
+                        at_preds_list.append(np.nan)
+                    else:                
+                        at_preds_list.append(away_team_df.iloc[-1][ht_pred_col])
                 else:
-                    at_preds_list.append(away_team_df.iloc[-1][at_pred_col])
-                
+                    if pd.isnull(away_team_df.iloc[-1][at_pred_col]):
+                        at_preds_list.append(np.nan)
+                    else:
+                        at_preds_list.append(away_team_df.iloc[-1][at_pred_col])      
+                        
         ht_preds = np.array(ht_preds_list)
         at_preds = np.array(at_preds_list)        
         if np.nan not in ht_preds_list:

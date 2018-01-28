@@ -49,7 +49,8 @@ def look_at_strategies(game_df, date, options):
         stat_map[key] = pct_counts
     if options.plot_file:
         plot_over_under_pcts(stat_map, options.plot_file)
-        
+        plot_col_running_sum(game_df, "OU_HIT_modeled_-3", options.plot_file)                
+    game_df.to_csv("game_df.csv")
     sys.exit()
     stat_map = {}
     # Add whatever columns we want to look at
