@@ -132,14 +132,14 @@ def look_at_daily_bets(game_df, odds_df, date, options):
             home_team_avg = home_team_df.iloc[-1]['AwayTeamAvg3Games']
         else:
             home_team_avg = home_team_df.iloc[-1]['HomeTeamAvg3Games']
-            
         print ("\t%s %s : %f" % (row['Home_Team'], 'TeamAvg3Games', home_team_avg))
-        print ("\t%f" % (home_team_avg+away_team_avg))
+        avg_points = home_team_avg+away_team_avg        
+        print ("\t%f" % (avg_points))
         #
         # If the teams have been averaging more than 7 over the O/U, it's usually over
         #
-        if (home_team_avg+away_team_avg) - abs(row['Over_under_Open']) >= 7:
-            print ("  --YOOO BET ON THE OVER HERE: BEEN AVERAGING %d!!!" % (home_team_avg+away_team_avg))
+        if avg_points - abs(row['Over_under_Open']) >= 7:
+            print ("  --YOOO BET ON THE OVER HERE: BEEN AVERAGING %d!!!" % (avg_points))
         ###########################################
         # Add modeled_points
         ###########################################
@@ -221,8 +221,12 @@ def look_at_daily_bets(game_df, odds_df, date, options):
         if (abs(row['Over_under_Open'])-modeled_OU) > 3:
             print ("  --YOOO BET ON THE UNDER HERE: Model expecting: %d!!!" % (modeled_OU))            
 
-        print ("-------------------------------------------------------")            
-        
+
+        # If modeled is more than 2 under AND average is more than 2 under.  Bet.
+        if (((abs(row['Over_under_Open'])-modeled_OU) > 2) and
+            ((abs(row['Over_under_Open'])-avg_points) > 2)):
+            print ("  --YOOO BET ON THE UNDER HERE: Model expecting %d AND avg saying %d!!!" % (modeled_OU, avg_points))
+        print ("-------------------------------------------------------")        
         
 
 def plot_col_running_sum(game_df, col, plot_file):
@@ -567,10 +571,9 @@ def process(game_dir, odds_dir, odds_base, date, league, options):
     game_df.to_csv("game_df.csv")    
 
 def main():
-    usage_str = "%prog basketball_game_dir odds_dir file_base league date"
+    usage_str = "%prog basketball_game_dir odds_dir league date"
     usage_str = "%s\n\t basketball_game_dir : dir containing csv file containing final scores of the games" % usage_str
     usage_str = "%s\n\t odds_dir : directory with dated subdirs containing csv files of the odds" % usage_str
-    usage_str = "%s\n\t file_base : basename of files to grab" % usage_str
     usage_str = "%s\n\t league : ['NBA' or 'NCAA']" % usage_str
     usage_str = "%s\n\t date : date of bets to look at (YYYYmmdd)" % usage_str        
     parser = OptionParser(usage = usage_str)
@@ -578,17 +581,21 @@ def main():
         
     (options, args) = parser.parse_args()
     
-    if len(args) < 5:
+    if len(args) < 4:
         parser.print_help()
         sys.exit(2)
 
                                   
     game_dir = args[0]
     odds_dir = args[1]
-    odds_base = args[2]
-    league = args[3]
-    date = args[4]
+    league = args[2]
+    date = args[3]
 
+    if league == 'NBA':
+        odds_base = "NBA_vegas_bets"
+    else:
+        odds_base = "NCAAB_vegas_bets"
+        
     process(game_dir, odds_dir, odds_base, date, league, options)
 
 

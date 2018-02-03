@@ -12,7 +12,7 @@ import NBA_utils
 import Tutils
 import numpy as np
 import pandas as pd
-from bokeh.plotting import figure, show, output_file
+from bokeh.plotting import figure, show, output_file, save
 import analyze_ML_model
 import MODEL_utils
 import pickle
@@ -43,31 +43,50 @@ def look_at_strategies(game_df, date, options):
     #
     game_df = add_modeled_points(game_df, team_df_map)
     stat_map = {}    
-    for r in range(1, 15):
+    for r in range(2, 15):
         pct_counts = NBA_utils.print_threshold_counts("Modeled_home_points", "Modeled_away_points", r, game_df, "modeled")
         key = "modeled %d" % r
         stat_map[key] = pct_counts
     if options.plot_file:
-        plot_over_under_pcts(stat_map, options.plot_file)
-        plot_col_running_sum(game_df, "OU_HIT_modeled_-3", options.plot_file)                
-    game_df.to_csv("game_df.csv")
-    sys.exit()
+        plot_over_under_pcts(stat_map, "model", options.plot_file)
+        plot_col_running_sum(game_df, "OU_HIT_modeled_-3", options.plot_file)
+        
     stat_map = {}
     # Add whatever columns we want to look at
-    for d in range(2,4):
-        for r in range(1, 15):    
+    for d in range(3,4):
+        for r in range(2, 15):    
             pct_counts = add_col_and_print_threshold_counts(game_df, d, r, team_df_map)
             key = "%d %d" % (d, r)
             stat_map[key] = pct_counts
     
     #
     if options.plot_file:
-        plot_over_under_pcts(stat_map, options.plot_file)
+        plot_over_under_pcts(stat_map, "avg", options.plot_file)
         plot_col_running_sum(game_df, "OU_HIT_3_avg_8", options.plot_file)
         #plot_col_running_sum(game_df, "OU_HIT_3_avg_9", options.plot_file)
         #plot_col_running_sum(game_df, "OU_HIT_3_avg_6", options.plot_file)
         #plot_col_running_sum(game_df, "OU_HIT_3_avg_7", options.plot_file)        
 
+
+    #
+    # Look at cases where BOTH the modeled and average are higher / lower than the provided
+    #
+    stats_map = {}
+    modeled_var_name = "OU_HIT_modeled_2"    
+    for r in range(2, 15):
+        avg_var_name = "OU_HIT_3_avg_%s" % r
+        new_col_name = "combined_col_%s" % r
+        pct_counts = NBA_utils.check_mult_var_OU_counts(modeled_var_name, avg_var_name, game_df, 1, new_col_name)
+        print (modeled_var_name, avg_var_name)
+        print (pct_counts)
+        key = "combined %s" % r
+        stats_map[key] = pct_counts
+        
+    if options.plot_file:
+        plot_over_under_pcts(stats_map, "combined_over", options.plot_file)
+
+    game_df.to_csv("game_df.csv")            
+    sys.exit()
         
 def add_modeled_points(game_df, team_df_map):
     """
@@ -162,7 +181,6 @@ def get_model_prediction(model, row, predictors, team_col, training_end_date):
 def plot_col_running_sum(game_df, col, plot_file):
     """
     """
-    game_df.to_csv("game_df.csv")
     p1 = figure(plot_width=1000, tools=TOOLS)
     #this_df = game_df.dropna([col])
     all_dates = game_df['GameTime'].unique().tolist()
@@ -175,10 +193,13 @@ def plot_col_running_sum(game_df, col, plot_file):
         running_sum = running_sum + game_df[(game_df['GameTime']==d)][col].sum()
         y_data.append(running_sum)
         itr+=1
-    p1.line(x_data, y_data, legend=col)        
+    p1.line(x_data, y_data, legend=col)
+    output_name = "%s_%s.html" % (plot_file.replace(".html",""), col)
+    output_file(output_name)
+    save(p1)
     show(p1)
     
-def plot_over_under_pcts(stat_map, plot_file):
+def plot_over_under_pcts(stat_map, plot_name, plot_file):
     """
     Stat_map : dictionary
         key = 'game_avg threshold'
@@ -210,6 +231,9 @@ def plot_over_under_pcts(stat_map, plot_file):
         lgd = "%s game avg Under Under pct" % dy
         p1.line(all_thresholds, uu_pcts, color = colors[d], legend=lgd)
         p1.circle(all_thresholds, uu_pcts, fill_color='white', size=uu_counts)
+        
+    output_name = "%s_%s.html" % (plot_file.replace(".html",""), plot_name)
+    output_file(output_name)    
     show(p1)
 
     
@@ -463,13 +487,11 @@ def process(game_dir, odds_dir, odds_base, date, league, options):
 
     # Analyze this dates bets
     look_at_strategies(game_df, date, options)
-    game_df.to_csv("game_df.csv")    
 
 def main():
-    usage_str = "%prog basketball_game_dir odds_dir file_base league date"
+    usage_str = "%prog basketball_game_dir odds_dir league date"
     usage_str = "%s\n\t basketball_game_dir : dir containing csv file containing final scores of the games" % usage_str
     usage_str = "%s\n\t odds_dir : directory with dated subdirs containing csv files of the odds" % usage_str
-    usage_str = "%s\n\t file_base : basename of files to grab" % usage_str
     usage_str = "%s\n\t league : ['NBA' or 'NCAA']" % usage_str
     usage_str = "%s\n\t date : date of bets to look at (YYYYmmdd)" % usage_str        
     parser = OptionParser(usage = usage_str)
@@ -477,16 +499,20 @@ def main():
         
     (options, args) = parser.parse_args()
     
-    if len(args) < 5:
+    if len(args) < 4:
         parser.print_help()
         sys.exit(2)
 
                                   
     game_dir = args[0]
     odds_dir = args[1]
-    odds_base = args[2]
-    league = args[3]
-    date = args[4]
+    league = args[2]
+    date = args[3]
+    
+    if league == 'NBA':
+        odds_base = "NBA_vegas_bets"
+    else:
+        odds_base = "NCAAB_vegas_bets"
 
     process(game_dir, odds_dir, odds_base, date, league, options)
 
