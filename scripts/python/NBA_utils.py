@@ -218,7 +218,7 @@ def add_over_under_col(game_df, home_points_col, away_points_col, col_name):
     game_df[col_name] = new_col
 
     return (over, under, perfect, skipped)
-    
+
 
 def add_OU_HIT_col(game_df, home_points_col, away_points_col, col_name):
     """
@@ -309,14 +309,18 @@ def add_over_under_col_threshold(game_df, home_points_col, away_points_col, col_
             skipped += 1
             new_col.append(np.nan)
             continue
-        avg_points = row[home_points_col] + row[away_points_col]
+        elif abs(row['predicted_over_under']) == 9999:
+            skipped += 1
+            new_col.append(np.nan)
+            continue
+        my_points = row[home_points_col] + row[away_points_col]
         predicted_points = abs(row['predicted_over_under'])
         #
         # If there is a posative threshold --
         #      ignore all cases where the avg was less than predicted+threshold
         #
         if threshold > 0:
-            if (abs(avg_points) < (predicted_points + threshold)):
+            if (abs(my_points) < (predicted_points + threshold)):
                 skipped += 1
                 new_col.append(np.nan)
                 continue
@@ -325,7 +329,7 @@ def add_over_under_col_threshold(game_df, home_points_col, away_points_col, col_
         #      ignore all cases where the avg was more than predicted+threshold
         #
         else:
-            if (abs(avg_points) > (predicted_points + threshold)):
+            if (abs(my_points) > (predicted_points + threshold)):
                 skipped += 1
                 new_col.append(np.nan)
                 continue
@@ -346,6 +350,64 @@ def add_over_under_col_threshold(game_df, home_points_col, away_points_col, col_
     game_df[col_name] = new_col
 
     return (over, under, perfect, skipped)
+
+def add_PS_col_threshold(game_df, home_points_col, away_points_col, col_name, threshold):
+    """
+    Same as 'add_over_under_col' but only looks at games where
+    the difference is over a certain threshold -- POINT SPREAD
+    """
+    # Get count of how many games were over or under the spread
+    hit = 0
+    miss = 0
+    perfect = 0
+    skipped = 0
+    new_col = []
+    for ind, row in game_df.iterrows():
+        #
+        # If we are missing any of these fields, skip
+        # 
+        if pd.isnull(row['predicted_spread']):
+            skipped += 1
+            new_col.append(np.nan)
+            continue
+        if pd.isnull(row[home_points_col]) or pd.isnull(row[away_points_col]):
+            skipped += 1
+            new_col.append(np.nan)
+            continue
+        elif abs(row['predicted_spread'])==9999:
+            skipped += 1
+            new_col.append(np.nan)
+            continue
+        my_spread = row[away_points_col]-row[home_points_col]
+        predicted_spread = row['predicted_spread']
+        actual_spread = row[AWAY_TEAM_PTS] - row[HOME_TEAM_PTS]
+        #
+        # Ignore all cases where my PS doesn't differ from the given PS by more than threshold
+        #
+        if abs(my_spread - predicted_spread) < threshold:
+            skipped += 1
+            new_col.append(np.nan)
+            continue
+        #
+        # Check to see if I hit or miss
+        #
+        if ((my_spread > predicted_spread) and
+            (actual_spread > predicted_spread)):
+            hit += 1
+            new_col.append(1)
+        elif ((my_spread < predicted_spread) and
+              (actual_spread < predicted_spread)):
+            hit += 1
+            new_col.append(1)
+        elif (actual_spread == predicted_spread):
+            perfect += 1
+            new_col.append(0)
+        else:
+            miss += 1
+            new_col.append(-1)
+
+    game_df[col_name] = new_col            
+    return (hit, miss, perfect, skipped)
 
 def print_over_under(over, under, perfect, skipped):
     print ("---------------------------------------")
@@ -448,7 +510,36 @@ def print_threshold_counts(home_col, away_col, threshold, game_df, col_name):
         uu_count = this_info[1]+this_info[0]
 
     return (oo_pct, oo_count, uu_pct, uu_count)
+
+def print_PS_threshold_counts(home_col, away_col, threshold, game_df, col_name):
+    """
+    Prints how many times the 'home_col'+'away_col' beat the predicted based on the threshold
+    """
+    #
+    # Check O/U when teams are averaging more than thshld points over the spread
+    #
+    this_info = add_PS_col_threshold(game_df, home_col, away_col,
+                                     ("PS_HIT_%s_%d" % (col_name, threshold)),
+                                     threshold)
+    print ("NUM GAMES AVG OVER/UNDERS WHEN AVG > spread+%d: %s" % (threshold, col_name))
+    print_over_under(this_info[0], this_info[1], this_info[2], this_info[3])
+    if this_info[0]+this_info[0]==0:
+        hit_pct = np.nan
+        hit_count = np.nan
+    elif this_info[1] == 0:
+        #oo_pct = 5
+        hit_pct = 1        
+        hit_count = this_info[0]
+    else:
+        #oo_pct = this_info[0]/this_info[1]
+        hit_pct = this_info[0]/(this_info[0]+this_info[1])
+        hit_count = this_info[0]
+    miss_count = this_info[1]
+    miss_pct = 1-hit_pct
     
+    return (hit_pct, hit_count, miss_pct, miss_count)
+
+
 def get_bball_epoch_dt(row):
     game_date_str = str(int(row['GameTime']))
     return Tutils.tme2epoch(game_date_str, "%Y%m%d")
@@ -622,3 +713,60 @@ def calculate_team_allowed_avg_xdays_game_df(team_name, num_games, row, team_df)
         elif rw['HomeTeam'] == team_name:
             team_points.append(rw['AwayPoints'])
     return (sum(team_points)/len(team_points))
+
+
+def analyze_point_spreads(game_df):
+    """
+    """
+    # Get a count of the times vegas was over the spread and under
+    OS = 0
+    US = 0
+    avg_error = []
+    for ind, row in game_df.iterrows():
+        if pd.isnull(row['predicted_spread']):
+            continue
+        elif abs(row['predicted_spread'])==9999:
+            continue
+        adjusted_home_points = row['HomePoints']+row['predicted_spread']
+        if (adjusted_home_points > row['AwayPoints']):
+            OS += 1
+        else:
+            US += 1
+        avg_error.append(abs(adjusted_home_points - row['AwayPoints']))
+        print (avg_error[-1])
+    print ("Num Times spread was too high: %d" % OS)
+    print ("Num Times spread was too low: %d" % US)
+    print ("Avg Error: %f" % (sum(avg_error)/len(avg_error)))
+    
+
+def check_mult_var_OU_counts(var1, var2, game_df, value, new_col_name):
+    """
+    Looks at all cases where var1 AND var2 say 'value' and see how they compare vs the over under
+    """
+    hit = 0
+    miss = 0
+    perfect = 0
+    new_col = []
+    for ind, row in game_df.iterrows():
+        # Skip mising rows
+        if pd.isnull(row[var1]) or pd.isnull(row[var2]) or pd.isnull(row['Over_Under_HIT']):
+            new_col.append(np.nan)
+            continue
+        # If both columns hit their value, it is a hit
+        if row[var1] == value and row[var2] == value:
+            new_col.append(1)
+            hit += 1
+        elif row[var1] == 0 and row[var2] == 0:
+            new_col.append(0)
+            perfect += 1                
+        else:
+            new_col.append(-1)
+            miss += 1
+
+    game_df[new_col_name] = new_col
+    if hit == 0:
+        hit_pct = 0
+    else:
+        hit_pct = (hit / (hit + miss))
+    miss_pct = 1-hit_pct
+    return (hit_pct, hit, miss_pct, miss)
