@@ -25,7 +25,8 @@ AWAY_TEAM = 'AwayTeam'
 AWAY_TEAM_PTS = 'AwayPoints'
 
 
-model_file = r"C:\Users\Tom\programming\static\model\basic_RF_V5.sav"
+#model_file = r"C:\Users\Tom\programming\static\model\basic_RF_V5.sav"
+model_file = r"C:\Users\Tom\programming\test\20180211_autotune_models\model\V8.sav"
 
 def look_at_daily_bets(game_df, odds_df, date, options):
     """
@@ -93,7 +94,7 @@ def look_at_daily_bets(game_df, odds_df, date, options):
     #    
     day_df = recent_odds_df[recent_odds_df['GameDateEpoch']==this_epch]    
     for ind, row in day_df.iterrows():
-        print ("Info on game %s at %s. Over_Under: %f" % (row['Away_Team'], row['Home_Team'], row['Over_under_Open']))
+        print ("Info on game %s at %s. Over_Under: %f" % (row['Away_Team'], row['Home_Team'], row['Over_under_VI Consensus']))
 
         ###########################################################        
         #
@@ -103,8 +104,8 @@ def look_at_daily_bets(game_df, odds_df, date, options):
         print_team_over_unders(game_df, row, 'Away_Team')
         print_team_over_unders(game_df, row, 'Home_Team')        
         # Look at last 3 away games for away team
-        print_last_x_games(game_df, this_epch, 3, 'RemappedAwayTeam', 'Away_Team', row, 'away')
-        print_last_x_games(game_df, this_epch, 3, 'RemappedHomeTeam', 'Home_Team', row, 'home')
+        print_last_x_games(game_df, this_epch, 10, 'RemappedAwayTeam', 'Away_Team', row, 'away')
+        print_last_x_games(game_df, this_epch, 10, 'RemappedHomeTeam', 'Home_Team', row, 'home')
         ###########################################################
 
         # Get game_df maps for this team
@@ -138,7 +139,7 @@ def look_at_daily_bets(game_df, odds_df, date, options):
         #
         # If the teams have been averaging more than 7 over the O/U, it's usually over
         #
-        if avg_points - abs(row['Over_under_Open']) >= 7:
+        if avg_points - abs(row['Over_under_Open']) >= 9:
             print ("  --YOOO BET ON THE OVER HERE: BEEN AVERAGING %d!!!" % (avg_points))
         ###########################################
         # Add modeled_points
@@ -207,25 +208,29 @@ def look_at_daily_bets(game_df, odds_df, date, options):
         if np.nan not in ht_preds_list:
             ht_fcst = model.predict(ht_preds.reshape(1,-1))[0]
         else:
-            ht_fcst = "-9999"
+            ht_fcst = -9999
         if np.nan not in at_preds_list:            
             at_fcst = model.predict(at_preds.reshape(1,-1))[0]
         else:
-            at_fcst = "-9999"
+            at_fcst = -9999
         print (ht_preds)
         print ("\tModeled HomeTeam points: %s" % ht_fcst)
         print (at_preds)
         print ("\tModeled AwayTeam points: %s" % at_fcst)
         modeled_OU = ht_fcst + at_fcst
         # If the modeled OU is more than 3 under the vegas line, bet this bitch
-        if (abs(row['Over_under_Open'])-modeled_OU) > 3:
-            print ("  --YOOO BET ON THE UNDER HERE: Model expecting: %d!!!" % (modeled_OU))            
+        print (row['Over_under_VI Consensus'])
+        if (((abs(row['Over_under_VI Consensus'])-modeled_OU) > 2) &
+            ((abs(row['Over_under_VI Consensus'])-modeled_OU) < 5)):
+            print ("  --YOOO BET ON THE UNDER HERE: Model expecting: %d!!!" % (modeled_OU)) 
 
-
+        if ((modeled_OU - 9) > abs(row['Over_under_VI Consensus'])):
+            print ("  --YOOO BET ON THE OVER HERE: Model expecting: %d!!!" % (modeled_OU))
+            
         # If modeled is more than 2 under AND average is more than 2 under.  Bet.
-        if (((abs(row['Over_under_Open'])-modeled_OU) > 2) and
-            ((abs(row['Over_under_Open'])-avg_points) > 2)):
-            print ("  --YOOO BET ON THE UNDER HERE: Model expecting %d AND avg saying %d!!!" % (modeled_OU, avg_points))
+        #if (((abs(row['Over_under_VI Consensus'])-modeled_OU) > 2) and
+        #    ((abs(row['Over_under_VI Consensus'])-avg_points) > 2)):
+        #    print ("  --YOOO BET ON THE UNDER HERE: Model expecting %d AND avg saying %d!!!" % (modeled_OU, avg_points))
         print ("-------------------------------------------------------")        
         
 
@@ -328,7 +333,17 @@ def add_model_predictors(predictors, game_df, this_epch, team_df_map):
                                                       axis=1)
               game_df[away_team_pred] = game_df.apply(lambda row: NBA_utils.calculate_current_team_rest_game_df(row['AwayTeam'], row, team_df_map[row['AwayTeam']],
                                                                                                                 this_epch),
-                                                      axis=1)             
+                                                      axis=1)
+        elif (p.find("win_sum")!=-1):
+            home_team_pred = 'HomeTeam_' + p
+            away_team_pred = 'AwayTeam_' + p            
+            if p.startswith("Opp"):
+                game_df[home_team_pred] = game_df.apply(lambda row: NBA_utils.get_team_current_win_sum_game_df(row, game_df, row['AwayTeam']), axis=1)
+                game_df[away_team_pred] = game_df.apply(lambda row: NBA_utils.get_team_current_win_sum_game_df(row, game_df, row['HomeTeam']), axis=1)
+            else:
+                game_df[home_team_pred] = game_df.apply(lambda row: NBA_utils.get_team_current_win_sum_game_df(row, game_df, row['HomeTeam']), axis=1)
+                game_df[away_team_pred] = game_df.apply(lambda row: NBA_utils.get_team_current_win_sum_game_df(row, game_df, row['AwayTeam']), axis=1)
+        
         else:
               print ("Error: Not sure how to calculate: %s" % p)
               sys.exit()
@@ -504,8 +519,8 @@ def print_last_x_games(game_df, this_epch, num_games, game_team_str, team_str, r
     last_x_games = game_df[((game_df[game_team_str]==row[team_str]) &
                             (game_df['EpochDt'] < this_epch))].sort_values(['EpochDt'])[-num_games:]
     info_list = NBA_utils.analyze_over_under(last_x_games)
-    print ("\t%s has beat the spread %d times out of the last 3 %s games" % (row[team_str],
-                                                                             info_list[0], HA_str))
+    print ("\t%s has beat the spread %d times out of the last %d %s games" % (row[team_str], info_list[0],
+                                                                              num_games, HA_str))
 
         
 def print_team_over_unders(game_df, row, team_str):

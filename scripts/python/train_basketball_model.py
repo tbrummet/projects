@@ -11,13 +11,13 @@ from optparse import OptionParser
 import NBA_utils
 import Tutils
 import pandas as pd
+import numpy as np
 from sklearn.ensemble import RandomForestRegressor,ExtraTreesRegressor,GradientBoostingRegressor
 from sklearn.datasets import make_classification
 from sklearn.neighbors import KNeighborsRegressor,NearestCentroid
 from sklearn.cross_decomposition import PLSRegression
 from sklearn import datasets, linear_model, tree, utils, preprocessing
 from sklearn.naive_bayes import GaussianNB,BernoulliNB
-
 from sklearn import cross_validation
 import pickle
 
@@ -27,12 +27,26 @@ import pickle
 #V2
 #PREDICTORS = ['Prior_3_game_avg', 'Prior_5_game_avg', 'Opp_allowed_Prior_5_game_avg', 'rest']
 #V3
-PREDICTORS = ['Prior_3_game_avg', 'Prior_5_game_avg', 'Opp_allowed_Prior_3_game_avg', 'Opp_allowed_Prior_5_game_avg', 'rest']
+#PREDICTORS = ['Prior_3_game_avg', 'Prior_5_game_avg', 'Opp_allowed_Prior_3_game_avg', 'Opp_allowed_Prior_5_game_avg', 'rest']
 #V4
 #PREDICTORS = ['Prior_3_game_avg', 'Prior_5_game_avg', 'Prior_7_game_avg', 'Opp_allowed_Prior_3_game_avg', 'Opp_allowed_Prior_5_game_avg',
 #              'Opp_allowed_Prior_7_game_avg', 'rest']
 #V5
-PREDICTORS = ['Prior_1_game_score', 'Prior_3_game_avg', 'Prior_5_game_avg', 'Opp_allowed_Prior_3_game_avg', 'Opp_allowed_Prior_5_game_avg', 'rest']
+#PREDICTORS = ['Prior_1_game_score', 'Prior_3_game_avg', 'Prior_5_game_avg', 'Opp_allowed_Prior_3_game_avg', 'Opp_allowed_Prior_5_game_avg', 'rest']
+#V6
+#PREDICTORS = ['Prior_1_game_score', 'Prior_3_game_avg', 'Prior_5_game_avg', 'Opp_allowed_Prior_3_game_avg', 'Opp_allowed_Prior_5_game_avg', 'rest',
+#              'win_sum']
+#V7 -- Decent at the under, non autotune
+#PREDICTORS = ['Prior_1_game_score', 'Prior_3_game_avg', 'Prior_5_game_avg', 'Opp_allowed_Prior_3_game_avg', 'Opp_allowed_Prior_5_game_avg', 'rest',
+#              'Opp_rest', 'win_sum', 'Opp_win_sum']
+#V8
+PREDICTORS = ['Prior_1_game_score', 'Prior_3_game_avg', 'Prior_5_game_avg', 'Opp_allowed_Prior_3_game_avg', 'Opp_allowed_Prior_5_game_avg', 'rest',
+              'win_sum']
+#V9
+#PREDICTORS = ['Prior_1_game_score', 'Prior_3_game_avg', 'Prior_5_game_avg', 'Opp_allowed_Prior_3_game_avg', 'Opp_allowed_Prior_5_game_avg', 'rest',
+#              'win_sum', 'Opp_win_sum']
+
+WEEK = 604800
 
 def create_base_df(sorted_game_df):
     # Iterate through the dataframe and make the data that I need
@@ -46,6 +60,8 @@ def create_base_df(sorted_game_df):
     opp_points_list = []    
     home_away_list = []  # 1 = home, 0 = away
     for ind, row in sorted_game_df.iterrows():
+        if pd.isnull(row['AwayPoints']) or pd.isnull(row['HomePoints']):
+            continue
         # For each row, need to make 2 rows, one for home and 1 for away team
         game_time_list.append(row["EpochDt"])
         game_time_list.append(row["EpochDt"])
@@ -62,7 +78,7 @@ def create_base_df(sorted_game_df):
         home_away_list.append(0)
         home_away_list.append(1)
 
-    master_df = pd.DataFrame(columns=["GameTime","GameTimeStr","Team","PointsScored"])
+    master_df = pd.DataFrame()
     master_df["GameTime"] = game_time_list
     master_df["GameTimeStr"] = game_time_str_list
     master_df["Team"] = teams_list
@@ -104,6 +120,14 @@ def augment_df(base_df):
     base_df["Opp_allowed_Prior_7_game_avg"] = base_df.apply(lambda row: NBA_utils.calculate_opp_team_allowed_avg_past_xdays_base_df(row, base_df, 7),
                                                             axis=1)        
     base_df["rest"] = base_df.apply(lambda row: NBA_utils.calculate_team_rest_base_df(row, base_df), axis=1)
+    base_df["Opp_rest"] = base_df.apply(lambda row: NBA_utils.calculate_opp_team_rest_base_df(row, base_df), axis=1)
+
+    base_df['win_sum'] = base_df.apply(lambda row: NBA_utils.get_team_win_sum_base_df(row, base_df, row['Team']), axis=1)
+    base_df['Opp_win_sum'] = base_df.apply(lambda row: NBA_utils.get_team_win_sum_base_df(row, base_df, row['OppTeam']), axis=1)
+    
+    #team_win_sum_map = NBA_utils.calc_team_win_sum_base_df(base_df)
+    #base_df['win_sum'] = base_df.apply(lambda row: team_win_sum_map[row['Team']], axis=1)
+    #base_df['Opp_win_sum'] = base_df.apply(lambda row: team_win_sum_map[row['OppTeam']], axis=1)    
 
     return base_df
 
@@ -121,7 +145,7 @@ def test_model(model, preds, tgts):
 
     return (sum(error)/len(error))
         
-def create_ML_model(base_df, target, training_start, training_end, output_base):
+def create_ML_model(base_df, target, training_start, training_end, testing_end, output_base):
     """
     """
     # Training data should only be within the provided start/end date
@@ -130,7 +154,8 @@ def create_ML_model(base_df, target, training_start, training_end, output_base):
     (train_predictor_array, train_target_array) = make_predictor_target_arrays(training_df, target)
 
     # Testing data
-    testing_df = base_df[(base_df['GameTime']>=training_end)].reset_index(drop=True)
+    testing_df = base_df[((base_df['GameTime']>=training_end) &
+                          (base_df['GameTime']<testing_end))].reset_index(drop=True)
     (test_predictor_array, test_target_array) = make_predictor_target_arrays(testing_df, target)
     
     print ("Length of training dataset: %d" % len(train_target_array))
@@ -138,6 +163,7 @@ def create_ML_model(base_df, target, training_start, training_end, output_base):
     
     # Fit the model
     model = RandomForestRegressor(random_state=1)
+    #model = ExtraTreesRegressor(random_state=1)    
     model.fit(train_predictor_array, train_target_array)
 
     # Score the model over the testing dataset
@@ -171,8 +197,9 @@ def create_ML_model(base_df, target, training_start, training_end, output_base):
     outF.close()
 
     return model    
-        
-def process(bball_games_dir, league, output_base):
+
+
+def process(bball_games_dir, league, output_base, options):
     # Read all of the basketball games
     game_df = NBA_utils.read_OP_bball_dir(bball_games_dir)
     game_df['EpochDt'] = game_df.apply(lambda row: NBA_utils.get_bball_epoch_dt(row), axis=1)
@@ -185,16 +212,42 @@ def process(bball_games_dir, league, output_base):
     # Add predictors we need, like the prior game score
     base_df = augment_df(base_df)
 
+    base_df.to_csv("base_df.csv", index=False)
     
     # Create the ML model
     model_start_epoch = Tutils.tme2epoch("20171001", "%Y%m%d")
     model_end_epoch = Tutils.tme2epoch("20180110", "%Y%m%d")
-    model = create_ML_model(base_df, 'PointsScored', model_start_epoch, model_end_epoch, output_base)
-    
+    testing_end = game_df['EpochDt'].max()
+    # Create models for each team
+    if options.team_model:
+        teams = base_df['Team'].unique().tolist()
+        for tm in teams:
+            team_df = base_df[base_df['Team']==tm]
+            team_str = tm.replace(" ","").replace(".","")
+            team_model_base = "%s_%s" % (output_base, team_str)
+            team_model = create_ML_model(team_df, 'PointsScored', model_start_epoch, model_end_epoch, testing_end, team_model_base)
+    elif options.autotune_model:
+        model_end_epoch = time.time()
+        this_model_end_epoch = Tutils.tme2epoch("20171215", "%Y%m%d")
+        # Loop over each week, creating the model from start_epoch -> start of week, evaluate on that week.
+        while this_model_end_epoch < model_end_epoch:
+            weekly_base = "%s_%s" % (output_base, Tutils.epoch2tme(this_model_end_epoch, "%Y%m%d"))
+            testing_end = this_model_end_epoch + WEEK
+            print ("Creating model from %s - %s.  Evaluating from %s - %s" % (Tutils.epoch2tme(model_start_epoch, "%Y%m%d:%H%M"),
+                                                                              Tutils.epoch2tme(this_model_end_epoch, "%Y%m%d:%H%M"),
+                                                                              Tutils.epoch2tme(this_model_end_epoch, "%Y%m%d:%H%M"),
+                                                                              Tutils.epoch2tme(testing_end, "%Y%m%d:%H%M")))
+            weekly_model = create_ML_model(base_df, 'PointsScored', model_start_epoch, this_model_end_epoch, testing_end,
+                                           weekly_base)
+            this_model_end_epoch += WEEK
+    else:
+        model = create_ML_model(base_df, 'PointsScored', model_start_epoch, model_end_epoch, testing_end, output_base)            
     
 def main():
     usage_str = "%prog basketball_game_dir league output_base"
     parser = OptionParser(usage = usage_str)
+    parser.add_option("-t", "--team_model", action="store_true", dest="team_model", help="make models specific to each team")
+    parser.add_option("-a", "--autotune_model", action="store_true", dest="autotune_model", help="makes and tests model on a weekly basis")    
         
     (options, args) = parser.parse_args()
     
@@ -207,7 +260,7 @@ def main():
     league = args[1]
     output_base = args[2]
 
-    process(bball_games_dir, league, output_base)
+    process(bball_games_dir, league, output_base, options)
 
 
 if __name__ == "__main__":

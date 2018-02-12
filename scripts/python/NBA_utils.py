@@ -65,6 +65,9 @@ def read_OP_bball_dir(in_dir):
         df = pd.concat([df, file_df])
         num_files += 1
 
+    # Make sure we have home and away scores
+    df = df[(np.isfinite(df['HomePoints']) &
+             (np.isfinite(df['AwayPoints'])))]
     df.drop_duplicates(inplace=True)        
     df.reset_index(inplace=True)
     print ("Read %d files" % num_files)
@@ -130,8 +133,8 @@ def add_odds(game_df, odds_df, league):
         
         if (len(game_odds) > 0):
             # Retrieve the last odds that were recorded for this game
-            predicted_points = game_odds['Over_under_Open'].tolist()[-1]
-            predicted_spread = game_odds['Point_spread_Open'].tolist()[-1]      
+            predicted_points = game_odds['Over_under_VI Consensus'].tolist()[-1]
+            predicted_spread = game_odds['Point_spread_VI Consensus'].tolist()[-1]      
 
             predicted_spread_list.append(predicted_spread)
             predicted_over_under_list.append(predicted_points)
@@ -320,7 +323,9 @@ def add_over_under_col_threshold(game_df, home_points_col, away_points_col, col_
         #      ignore all cases where the avg was less than predicted+threshold
         #
         if threshold > 0:
-            if (abs(my_points) < (predicted_points + threshold)):
+#            if ((abs(my_points) < (predicted_points + threshold)) or
+#                (abs(my_points) > (predicted_points + threshold+2))):
+            if (abs(my_points) < (predicted_points + threshold)):                
                 skipped += 1
                 new_col.append(np.nan)
                 continue
@@ -329,6 +334,8 @@ def add_over_under_col_threshold(game_df, home_points_col, away_points_col, col_
         #      ignore all cases where the avg was more than predicted+threshold
         #
         else:
+            #if ((abs(my_points) > (predicted_points + threshold)) or
+            #    (abs(my_points) < (predicted_points + threshold-2))):
             if (abs(my_points) > (predicted_points + threshold)):
                 skipped += 1
                 new_col.append(np.nan)
@@ -478,7 +485,7 @@ def print_threshold_counts(home_col, away_col, threshold, game_df, col_name):
                                                        threshold)
     print ("NUM GAMES AVG OVER/UNDERS WHEN AVG > spread+%d: %s" % (threshold, col_name))
     print_over_under(this_info[0], this_info[1], this_info[2], this_info[3])
-    if this_info[0]+this_info[0]==0:
+    if this_info[0]+this_info[1]==0:
         oo_pct = np.nan
         oo_count = np.nan
     elif this_info[1] == 0:
@@ -497,7 +504,7 @@ def print_threshold_counts(home_col, away_col, threshold, game_df, col_name):
                                                        -threshold)
     print ("NUM GAMES AVG OVER/UNDERS WHEN AVG < spread-%d: %s" % (threshold, col_name))    
     print_over_under(this_info[0], this_info[1], this_info[2], this_info[3])
-    if this_info[0]+this_info[0]==0:
+    if this_info[0]+this_info[1]==0:
         uu_pct = np.nan
         uu_count = np.nan
     elif this_info[0] == 0:
@@ -659,6 +666,19 @@ def calculate_team_rest_base_df(row, base_df):
     rest = round((game_time - last_game_time) / 86400)
     return rest
 
+def calculate_opp_team_rest_base_df(row, base_df):
+    """
+    """
+    # Get the last x games
+    team_df = base_df[((base_df["Team"] == row["OppTeam"]) &
+                       (base_df["GameTime"] < row["GameTime"]))].sort_values("GameTime").reset_index()
+    if len(team_df) == 0:
+        return np.nan
+    game_time = row["GameTime"]
+    last_game_time = team_df.iloc[-1]["GameTime"]
+    rest = round((game_time - last_game_time) / 86400)
+    return rest
+
 def calculate_team_rest_game_df(team_name, row, team_df):
     """
     """
@@ -770,3 +790,102 @@ def check_mult_var_OU_counts(var1, var2, game_df, value, new_col_name):
         hit_pct = (hit / (hit + miss))
     miss_pct = 1-hit_pct
     return (hit_pct, hit, miss_pct, miss)
+
+def get_team_win_sum_base_df(row, base_df, team):
+    """
+    """
+    team_df = base_df[((base_df['Team']==team) &
+                       (base_df['GameTime']<row['GameTime']))]
+    win_loss = 0
+    for ind, rw in team_df.iterrows():
+        if rw['PointsScored'] > rw['OppPointsScored']:
+            win_loss += 1
+        else:
+            win_loss -= 1            
+    return win_loss
+
+def get_team_win_sum_game_df(row, game_df, team):
+    """
+    """
+    team_home_df = game_df[((game_df['HomeTeam']==team) &
+                            (game_df['EpochDt']<row['EpochDt']))]
+    team_away_df = game_df[((game_df['AwayTeam']==team) &
+                            (game_df['EpochDt']<row['EpochDt']))]    
+    
+    win_loss = 0
+    for ind, rw in team_home_df.iterrows():
+        if rw['HomePoints'] > rw['AwayPoints']:
+            win_loss += 1
+        else:
+            win_loss -= 1            
+
+    for ind, rw in team_away_df.iterrows():
+        if rw['AwayPoints'] > rw['HomePoints']:
+            win_loss += 1
+        else:
+            win_loss -= 1            
+
+    return win_loss
+
+def get_team_current_win_sum_game_df(row, game_df, team):
+    """
+    """
+    team_home_df = game_df[((game_df['HomeTeam']==team) &
+                            (game_df['EpochDt']<=row['EpochDt']))]
+    team_away_df = game_df[((game_df['AwayTeam']==team) &
+                            (game_df['EpochDt']<=row['EpochDt']))]    
+    
+    win_loss = 0
+    for ind, rw in team_home_df.iterrows():
+        if rw['HomePoints'] > rw['AwayPoints']:
+            win_loss += 1
+        else:
+            win_loss -= 1            
+
+    for ind, rw in team_away_df.iterrows():
+        if rw['AwayPoints'] > rw['HomePoints']:
+            win_loss += 1
+        else:
+            win_loss -= 1            
+
+    return win_loss
+
+def calc_team_win_sum_base_df(base_df):
+    """
+    """
+    team_map = {}
+    all_teams = base_df['Team'].unique().tolist()
+    for tm in all_teams:
+        tm_games = base_df[base_df['Team']==tm]
+        win_loss = 0
+        for ind, row in tm_games.iterrows():
+            if row['PointsScored'] > row['OppPointsScored']:
+                win_loss += 1
+            else:
+                win_loss -= 1            
+        team_map[tm] = win_loss
+        
+    return team_map
+
+def calc_team_win_sum_game_df(game_df):
+    """
+    """
+    team_map = {}
+    all_teams = pd.unique(game_df[['HomeTeam','AwayTeam']].values.ravel('K')).tolist()
+    for tm in all_teams:
+        win_loss = 0        
+        tm_home_games = game_df[game_df['HomeTeam']==tm]
+        tm_away_games = game_df[game_df['AwayTeam']==tm]        
+        for ind, row in tm_home_games.iterrows():
+            if row['HomePoints']>row['AwayPoints']:
+                win_loss+=1
+            else:
+                win_loss-=1                
+        for ind, row in tm_away_games.iterrows():
+            if row['AwayPoints'] > row['HomePoints']:
+                win_loss += 1
+            else:
+                win_loss -= 1            
+        team_map[tm] = win_loss
+        
+    return team_map

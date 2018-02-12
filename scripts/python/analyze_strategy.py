@@ -26,8 +26,30 @@ AWAY_TEAM_PTS = 'AwayPoints'
 
 #PREDICTORS = ['Prior_1_game_score', 'Prior_3game_avg', 'HomeAway']
 
-model_file = r"C:\Users\Tom\programming\static\model\basic_RF_V5.sav"
-    
+#V5
+#model_file = r"C:\Users\Tom\programming\static\model\basic_RF_V5.sav"
+#info_file = r"C:\Users\Tom\programming\static\model\basic_RF_V5.info"
+#V6
+#model_file = r"C:\Users\Tom\programming\test\20180206_model\model\V6_tst.sav"
+#team_model_base = r"C:\Users\Tom\programming\static\team_models\V5"
+#info_file = r"C:\Users\Tom\programming\static\team_models\V5.info"
+
+#V7
+#model_file = r"C:\Users\Tom\programming\test\20180211_autotune_models\model\V7_autotune.sav"
+#info_file = r"C:\Users\Tom\programming\test\20180211_autotune_models\model\V7_autotune.info"
+#V8
+model_file = r"C:\Users\Tom\programming\test\20180211_autotune_models\model\V8.sav"
+info_file = r"C:\Users\Tom\programming\test\20180211_autotune_models\model\V8.info"
+#V9
+#model_file = r"C:\Users\Tom\programming\test\20180211_autotune_models\model\V9.sav"
+#info_file = r"C:\Users\Tom\programming\test\20180211_autotune_models\model\V9.info"
+
+#V7
+autotune_model_base = r"C:\Users\Tom\programming\test\20180211_autotune_models\model\V7_autotune"
+autotune_info_file = r"C:\Users\Tom\programming\test\20180211_autotune_models\model\V7_autotune_20171215.info"
+
+WEEK = 604800
+
 def look_at_strategies(game_df, date, options):
     """
     """
@@ -41,16 +63,40 @@ def look_at_strategies(game_df, date, options):
     #
     # Look at the cubist model compared to over under
     #
-    game_df = add_modeled_points(game_df, team_df_map)
-    stat_map = {}    
-    for r in range(2, 15):
-        pct_counts = NBA_utils.print_threshold_counts("Modeled_home_points", "Modeled_away_points", r, game_df, "modeled")
-        key = "modeled %d" % r
-        stat_map[key] = pct_counts
-    if options.plot_file:
-        plot_over_under_pcts(stat_map, "model", options.plot_file)
-        plot_col_running_sum(game_df, "OU_HIT_modeled_-3", options.plot_file)
-        
+    game_df = add_modeled_points(game_df, team_df_map, options)
+
+    if options.team_plot:
+        for tme in all_teams:
+            this_df = game_df[((game_df['HomeTeam']==tme) |
+                               (game_df['AwayTeam']==tme))].reset_index(drop=True)
+            this_plot = "%s_%s" % (options.plot_file.rstrip(".html"), tme.replace(" ","").replace(".",""))
+            stat_map = {}
+            print ("TEAM -- %s" % tme)
+            for r in range(2, 15):
+                pct_counts = NBA_utils.print_threshold_counts("Modeled_home_points", "Modeled_away_points", r, this_df, "modeled")
+                key = "modeled %d" % r
+                stat_map[key] = pct_counts
+
+            df_csv = tme.replace(" ","").replace(".","") + ".csv"
+            if options.plot_file:
+                plot_over_under_pcts(stat_map, "model", this_plot)
+            #plot_col_running_sum(game_df, "OU_HIT_modeled_-3", options.plot_file)
+    else:
+        stat_map = {}    
+        for r in range(1, 15):
+            pct_counts = NBA_utils.print_threshold_counts("Modeled_home_points", "Modeled_away_points", r, game_df, "modeled")
+            key = "modeled %d" % r
+            stat_map[key] = pct_counts
+            
+        if options.plot_file:
+            plot_over_under_pcts(stat_map, "model", options.plot_file)
+            plot_col_running_sum(game_df, "OU_HIT_modeled_-2", options.plot_file)
+            plot_col_running_sum(game_df, "OU_HIT_modeled_10", options.plot_file)            
+
+    game_df.to_csv("game_df.csv")            
+    #
+    # Look At averages
+    #
     stat_map = {}
     # Add whatever columns we want to look at
     for d in range(3,4):
@@ -58,7 +104,6 @@ def look_at_strategies(game_df, date, options):
             pct_counts = add_col_and_print_threshold_counts(game_df, d, r, team_df_map)
             key = "%d %d" % (d, r)
             stat_map[key] = pct_counts
-    
     #
     if options.plot_file:
         plot_over_under_pcts(stat_map, "avg", options.plot_file)
@@ -72,7 +117,7 @@ def look_at_strategies(game_df, date, options):
     # Look at cases where BOTH the modeled and average are higher / lower than the provided
     #
     stats_map = {}
-    modeled_var_name = "OU_HIT_modeled_2"    
+    modeled_var_name = "OU_HIT_modeled_10"    
     for r in range(2, 15):
         avg_var_name = "OU_HIT_3_avg_%s" % r
         new_col_name = "combined_col_%s" % r
@@ -87,15 +132,27 @@ def look_at_strategies(game_df, date, options):
 
     game_df.to_csv("game_df.csv")            
     sys.exit()
-        
-def add_modeled_points(game_df, team_df_map):
+
+
+def round_to_week(start_epoch, cur_epoch):
     """
     """
-    # Load in the model
-    model = pickle.load(open(model_file, "rb"))
+    if cur_epoch < start_epoch:
+        return start_epoch
+    diff = cur_epoch - start_epoch
+    num_weeks = int(diff / WEEK)
+    rounded_week = diff % WEEK
+    return (start_epoch + (num_weeks * WEEK))
+    
+def add_modeled_points(game_df, team_df_map, options):
+    """
+    """
+    # ASSUME A CONSTANT NAMES FILE TO SAVE ON I/O
     # Load in the info file
-    info_file = model_file.replace(".sav", ".info")
-    info_F = open(info_file, "r")
+    if options.autotune_model:
+        info_F = open(autotune_info_file, "r")
+    else:
+        info_F = open(info_file, "r")
     info_lines = info_F.readlines()
     # Get the predictors
     predictors = MODEL_utils.read_predictors_from_info(info_lines)
@@ -128,34 +185,89 @@ def add_modeled_points(game_df, team_df_map):
                                                                                                                 team_df_map[row['AwayTeam']]),
                                                     axis=1)
         elif (p.startswith("Opp_allowed_Prior")) and (p.find("_game_avg")!=-1):
-              # Add column for opponent allowed points
-              prior_day = int(p.split("_")[3])
-              home_team_pred = 'HomeTeam_' + p
-              away_team_pred = 'AwayTeam_' + p
-              game_df[home_team_pred] = game_df.apply(lambda row: NBA_utils.calculate_team_allowed_avg_past_xdays_game_df(row['AwayTeam'], prior_day,
-                                                                                                                          row, team_df_map[row['AwayTeam']]),
-                                                      axis=1)
-              game_df[away_team_pred] = game_df.apply(lambda row: NBA_utils.calculate_team_allowed_avg_past_xdays_game_df(row['HomeTeam'], prior_day,
-                                                                                                                          row, team_df_map[row['HomeTeam']]),
-                                                      axis=1)
+            # Add column for opponent allowed points
+            prior_day = int(p.split("_")[3])
+            home_team_pred = 'HomeTeam_' + p
+            away_team_pred = 'AwayTeam_' + p
+            game_df[home_team_pred] = game_df.apply(lambda row: NBA_utils.calculate_team_allowed_avg_past_xdays_game_df(row['AwayTeam'], prior_day,
+                                                                                                                        row, team_df_map[row['AwayTeam']]),
+                                                    axis=1)
+            game_df[away_team_pred] = game_df.apply(lambda row: NBA_utils.calculate_team_allowed_avg_past_xdays_game_df(row['HomeTeam'], prior_day,
+                                                                                                                        row, team_df_map[row['HomeTeam']]),
+                                                    axis=1)
         elif (p.find("rest")!=-1):
-              # Add column for rest
-              home_team_pred = 'HomeTeam_' + p
-              away_team_pred = 'AwayTeam_' + p
-              game_df[home_team_pred] = game_df.apply(lambda row: NBA_utils.calculate_team_rest_game_df(row['HomeTeam'], row, team_df_map[row['HomeTeam']]),
-                                                      axis=1)
-              game_df[away_team_pred] = game_df.apply(lambda row: NBA_utils.calculate_team_rest_game_df(row['AwayTeam'], row, team_df_map[row['AwayTeam']]),
-                                                      axis=1)             
+            # Add column for rest
+            home_team_pred = 'HomeTeam_' + p
+            away_team_pred = 'AwayTeam_' + p            
+            if p.startswith("Opp"):
+                game_df[home_team_pred] = game_df.apply(lambda row: NBA_utils.calculate_team_rest_game_df(row['AwayTeam'], row, team_df_map[row['AwayTeam']]),
+                                                        axis=1)
+                game_df[away_team_pred] = game_df.apply(lambda row: NBA_utils.calculate_team_rest_game_df(row['HomeTeam'], row, team_df_map[row['HomeTeam']]),
+                                                        axis=1)             
+            else:
+                game_df[home_team_pred] = game_df.apply(lambda row: NBA_utils.calculate_team_rest_game_df(row['HomeTeam'], row, team_df_map[row['HomeTeam']]),
+                                                        axis=1)
+                game_df[away_team_pred] = game_df.apply(lambda row: NBA_utils.calculate_team_rest_game_df(row['AwayTeam'], row, team_df_map[row['AwayTeam']]),
+                                                        axis=1)
+        elif (p.find("win_sum")!=-1):
+            home_team_pred = 'HomeTeam_' + p
+            away_team_pred = 'AwayTeam_' + p            
+            if p.startswith("Opp"):
+                game_df[home_team_pred] = game_df.apply(lambda row: NBA_utils.get_team_win_sum_game_df(row, game_df, row['AwayTeam']), axis=1)
+                game_df[away_team_pred] = game_df.apply(lambda row: NBA_utils.get_team_win_sum_game_df(row, game_df, row['HomeTeam']), axis=1)
+            else:
+                game_df[home_team_pred] = game_df.apply(lambda row: NBA_utils.get_team_win_sum_game_df(row, game_df, row['HomeTeam']), axis=1)
+                game_df[away_team_pred] = game_df.apply(lambda row: NBA_utils.get_team_win_sum_game_df(row, game_df, row['AwayTeam']), axis=1)
+                
+
         else:
-              print ("Error: Not sure how to calculate: %s" % p)
-              sys.exit()
+            print ("Error: Not sure how to calculate: %s" % p)
+            sys.exit()
             
 
-    # Now we have to run the model to produce the modeled_home_points and modeled_away_points
-    game_df['Modeled_home_points'] = game_df.apply(lambda row: get_model_prediction(model, row, predictors, 'HomeTeam', training_end_date),
-                                                   axis=1)
-    game_df['Modeled_away_points'] = game_df.apply(lambda row: get_model_prediction(model, row, predictors, 'AwayTeam', training_end_date),
-                                                   axis=1)    
+    if options.team_model:
+        print ("Loading up models specific to each team")
+        # Load up all of the models
+        all_teams = np.unique(game_df[['HomeTeam','AwayTeam']].values).tolist()
+        model_dict = {}
+        for tm in all_teams:
+            mod_file = "%s_%s.sav" % (team_model_base, tm.replace(" ","").replace(".",""))
+            mod = pickle.load(open(mod_file, "rb"))
+            model_dict[tm] = mod
+        game_df['Modeled_home_points'] = game_df.apply(lambda row: get_model_prediction(model_dict[row['HomeTeam']], row, predictors, 'HomeTeam', training_end_date),
+                                                       axis=1)
+        game_df['Modeled_away_points'] = game_df.apply(lambda row: get_model_prediction(model_dict[row['AwayTeam']], row, predictors, 'AwayTeam', training_end_date),
+                                                       axis=1)    
+
+    elif options.autotune_model:
+        print ("Loading up autotuned models")
+        # Load up all of the models
+        model_dict = {}
+        model_start_epoch = Tutils.tme2epoch("20171215", "%Y%m%d")
+        model_end_epoch = time.time()
+        week_itr = model_start_epoch
+        while week_itr < model_end_epoch:
+            weekly_mod_file = "%s_%s.sav" % (autotune_model_base, Tutils.epoch2tme(week_itr, "%Y%m%d"))
+            mod = pickle.load(open(weekly_mod_file, "rb"))
+            model_dict[week_itr] = mod
+            week_itr += WEEK
+
+            
+        game_df['Modeled_home_points'] = game_df.apply(lambda row: get_model_prediction(model_dict[round_to_week(model_start_epoch, row['EpochDt'])],
+                                                                                        row, predictors, 'HomeTeam', model_start_epoch),
+                                                       axis=1)
+        game_df['Modeled_away_points'] = game_df.apply(lambda row: get_model_prediction(model_dict[round_to_week(model_start_epoch, row['EpochDt'])],
+                                                                                        row, predictors, 'AwayTeam', model_start_epoch),
+                                                       axis=1)        
+        
+    else:
+        # Load in the model
+        model = pickle.load(open(model_file, "rb"))    
+        # Now we have to run the model to produce the modeled_home_points and modeled_away_points
+        game_df['Modeled_home_points'] = game_df.apply(lambda row: get_model_prediction(model, row, predictors, 'HomeTeam', training_end_date),
+                                                       axis=1)
+        game_df['Modeled_away_points'] = game_df.apply(lambda row: get_model_prediction(model, row, predictors, 'AwayTeam', training_end_date),
+                                                       axis=1)    
     
     return game_df
 
@@ -173,8 +285,9 @@ def get_model_prediction(model, row, predictors, team_col, training_end_date):
         if pd.isnull(row[pred_col]):
             return np.nan
         predictors_list.append(row[pred_col])
-        
+
     np_preds = np.array(predictors_list)
+
     fcst = model.predict(np_preds.reshape(1,-1))
     return fcst[0]
         
@@ -496,6 +609,9 @@ def main():
     usage_str = "%s\n\t date : date of bets to look at (YYYYmmdd)" % usage_str        
     parser = OptionParser(usage = usage_str)
     parser.add_option("-p", "--plot_file", dest="plot_file", help="make a plots")
+    parser.add_option("-t", "--team_model", action="store_true", dest="team_model", help="make models specific to each team")
+    parser.add_option("-a", "--autotune_model", action="store_true", dest="autotune_model", help="use autotuned models at weekly resolution")    
+    parser.add_option("-X", "--team_plots", action="store_true", dest="team_plot", help="make plots specific to each team.  Must also pass -p")        
         
     (options, args) = parser.parse_args()
     
