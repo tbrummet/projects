@@ -14,40 +14,13 @@ import pandas as pd
 import re
 import logging
 
-OUTPUT_DIR = r"C:\Users\Tom\programming\NBA_LINES"
+OUTPUT_DIR = r"C:\Users\Tom\programming"
 
 SPORTSBOOK_LIST = ['Open', 'VI Consensus', 'Westgate', 'MGM', 'WIlliam Hill', 'Wynn',
                    'CG Technology', 'Stations', 'BetOnline']
 
-LEAGUES = ['NBA', 'NCAAB']
+LEAGUES = ['NBA', 'NCAAB', 'NFL', 'NCAAF']
 
-def generate_lists(this_table):
-    """
-    """
-    list_array = [[]]*7
-
-    for row in this_table.findAll("tr"):
-        cells = row.findAll('td')        
-        states = row.findAll('th')
-        # TO only extract the table body
-        if len(cells)==6:
-            list_array[0].append(states[0].find(text=True))            
-            list_array[1].append(cells[0].find(text=True))
-            list_array[2].append(cells[1].find(text=True))
-            list_array[3].append(cells[2].find(text=True))
-            list_array[4].append(cells[3].find(text=True))
-            list_array[5].append(cells[4].find(text=True))
-            list_array[6].append(cells[5].find(text=True))            
-
-    df = pd.DataFrame(list_array[1],columns=['Number'])
-    df['State/UT'] = list_array[0]
-    df['Admin_Capital'] = list_array[2]
-    df['Legislative_Capital'] = list_array[3]
-    df['Judiciary_Capital'] = list_array[4]
-    df['Year_Capital'] = list_array[5]
-    df['Former_Capital'] = list_array[6]
-    
-    return df
 
 def parse_PS_string(PS_string):
     """
@@ -173,6 +146,7 @@ def process_odds_table(this_table, cur_time, league):
             else:
                 if len(first_string) > 1:
                     (spread, spread_value) = parse_PS_string(first_string)
+                    spread = abs(spread)
                 elif len(second_string) > 1:
                     (spread, spread_value) = parse_PS_string(second_string)
                 else:
@@ -209,7 +183,7 @@ def process_odds_table(this_table, cur_time, league):
 
     output_time_str = cur_time - (cur_time%1800)
     today_date = time.strftime("%Y%m%d.%H%M", time.localtime(output_time_str))
-    output_date_dir = "%s\%s" % (OUTPUT_DIR, today_date[:8])
+    output_date_dir = "%s\%s_LINES\%s" % (OUTPUT_DIR, league, today_date[:8])
     if not os.path.exists(output_date_dir):
         cmd = "mkdir %s" % output_date_dir
         logging.info("Executing: %s" % cmd)
@@ -226,7 +200,11 @@ def process(league, options):
     cur_time = time.time()
 
     if league == "NBA":
-        url = "http://www.vegasinsider.com/nba/odds/las-vegas/"        
+        url = "http://www.vegasinsider.com/nba/odds/las-vegas/"
+    elif league == "NFL":
+        url = "http://www.vegasinsider.com/nfl/odds/las-vegas/"
+    elif league == "NCAAF":
+        url = "http://www.vegasinsider.com/college-football/odds/las-vegas/"                
     else:
         url = "http://www.vegasinsider.com/college-basketball/odds/las-vegas/"
 
@@ -253,7 +231,7 @@ def process(league, options):
     #print (len(tables_list))
     #for x in range(0, len(tables_list)):
     #    print ("-------------------------- %d ---------------------------------" % len(tables_list[x]))
-    #    print (tables_list[x])
+    #    print (tables_list[x].encode("utf-8"))
     #sys.exit()
 
     # Assume the Odds table is the largest one
